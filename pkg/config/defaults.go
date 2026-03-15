@@ -524,6 +524,13 @@ func DefaultConfig() *Config {
 			WriteFile: ToolConfig{
 				Enabled: true,
 			},
+			CodingAgent: CodingAgentConfig{
+				ToolConfig:        ToolConfig{Enabled: true},
+				Backend:           "claude_code",
+				Force:             true,
+				TimeoutSeconds:    600,
+				SessionContinuity: true,
+			},
 		},
 		Heartbeat: HeartbeatConfig{
 			Enabled:  true,

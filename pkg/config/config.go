@@ -228,6 +228,7 @@ type AgentDefaults struct {
 	ImageModel                string         `json:"image_model,omitempty"           env:"PICOCLAW_AGENTS_DEFAULTS_IMAGE_MODEL"`
 	ImageModelFallbacks       []string       `json:"image_model_fallbacks,omitempty"`
 	MaxTokens                 int            `json:"max_tokens"                      env:"PICOCLAW_AGENTS_DEFAULTS_MAX_TOKENS"`
+	ContextWindow             int            `json:"context_window,omitempty"        env:"PICOCLAW_AGENTS_DEFAULTS_CONTEXT_WINDOW"`
 	Temperature               *float64       `json:"temperature,omitempty"           env:"PICOCLAW_AGENTS_DEFAULTS_TEMPERATURE"`
 	MaxToolIterations         int            `json:"max_tool_iterations"             env:"PICOCLAW_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
 	SummarizeMessageThreshold int            `json:"summarize_message_threshold"     env:"PICOCLAW_AGENTS_DEFAULTS_SUMMARIZE_MESSAGE_THRESHOLD"`
@@ -724,6 +725,21 @@ type MediaCleanupConfig struct {
 	Interval   int `                                    env:"PICOCLAW_MEDIA_CLEANUP_INTERVAL" json:"interval_minutes"`
 }
 
+type CodingAgentConfig struct {
+	ToolConfig        `                    envPrefix:"PICOCLAW_TOOLS_CODING_AGENT_"`
+	Backend           string `json:"backend"              env:"PICOCLAW_TOOLS_CODING_AGENT_BACKEND"`
+	Force             bool   `json:"force"                env:"PICOCLAW_TOOLS_CODING_AGENT_FORCE"`
+	TimeoutSeconds    int    `json:"timeout_seconds"      env:"PICOCLAW_TOOLS_CODING_AGENT_TIMEOUT_SECONDS"`
+	MaxTurns          int    `json:"max_turns"            env:"PICOCLAW_TOOLS_CODING_AGENT_MAX_TURNS"`
+	Command           string `json:"command"              env:"PICOCLAW_TOOLS_CODING_AGENT_COMMAND"`
+	Model             string `json:"model"                env:"PICOCLAW_TOOLS_CODING_AGENT_MODEL"`
+	SessionContinuity  bool   `json:"session_continuity"   env:"PICOCLAW_TOOLS_CODING_AGENT_SESSION_CONTINUITY"`
+	Effort             string `json:"effort"               env:"PICOCLAW_TOOLS_CODING_AGENT_EFFORT"`
+	AppendSystemPrompt string `json:"append_system_prompt"  env:"PICOCLAW_TOOLS_CODING_AGENT_APPEND_SYSTEM_PROMPT"`
+	Worktree           bool   `json:"worktree"             env:"PICOCLAW_TOOLS_CODING_AGENT_WORKTREE"`
+	Verbose            bool   `json:"verbose"              env:"PICOCLAW_TOOLS_CODING_AGENT_VERBOSE"`
+}
+
 type ReadFileToolConfig struct {
 	Enabled         bool `json:"enabled"`
 	MaxReadFileSize int  `json:"max_read_file_size"`
@@ -752,6 +768,7 @@ type ToolsConfig struct {
 	Subagent        ToolConfig         `json:"subagent"                                                 envPrefix:"PICOCLAW_TOOLS_SUBAGENT_"`
 	WebFetch        ToolConfig         `json:"web_fetch"                                                envPrefix:"PICOCLAW_TOOLS_WEB_FETCH_"`
 	WriteFile       ToolConfig         `json:"write_file"                                               envPrefix:"PICOCLAW_TOOLS_WRITE_FILE_"`
+	CodingAgent     CodingAgentConfig  `json:"coding_agent"`
 }
 
 type SearchCacheConfig struct {
@@ -1055,6 +1072,8 @@ func (t *ToolsConfig) IsToolEnabled(name string) bool {
 		return t.WriteFile.Enabled
 	case "mcp":
 		return t.MCP.Enabled
+	case "coding_agent":
+		return t.CodingAgent.Enabled
 	default:
 		return true
 	}

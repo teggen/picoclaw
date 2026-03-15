@@ -1,6 +1,19 @@
 package commands
 
-import "github.com/sipeed/picoclaw/pkg/config"
+import (
+	"context"
+
+	"github.com/sipeed/picoclaw/pkg/config"
+)
+
+// ContextInfo holds context window usage statistics.
+type ContextInfo struct {
+	EstimatedTokens int
+	ContextWindow   int
+	MaxOutputTokens int
+	MessageCount    int
+	HasSummary      bool
+}
 
 // Runtime provides runtime dependencies to command handlers. It is constructed
 // per-request by the agent loop so that per-request state (like session scope)
@@ -14,4 +27,6 @@ type Runtime struct {
 	SwitchModel        func(value string) (oldModel string, err error)
 	SwitchChannel      func(value string) error
 	ClearHistory       func() error
+	GetContextInfo     func() (*ContextInfo, error)
+	CompactHistory     func(ctx context.Context) (*ContextInfo, error)
 }

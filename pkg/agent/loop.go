@@ -1019,6 +1019,20 @@ func (al *AgentLoop) runLLMIteration(
 		// Build tool definitions
 		providerToolDefs := agent.Tools.ToProviderDefs()
 
+		// Compute effective max output tokens: leave room for input within the context window,
+		// but never exceed the configured MaxTokens cap.
+		effectiveMaxTokens := agent.MaxTokens
+		if agent.ContextWindow > 0 {
+			inputEstimate := al.estimateTokens(messages)
+			remaining := agent.ContextWindow - inputEstimate
+			if remaining < 1 {
+				remaining = 1
+			}
+			if remaining < effectiveMaxTokens {
+				effectiveMaxTokens = remaining
+			}
+		}
+
 		// Log LLM request details
 		logger.DebugCF("agent", "LLM request",
 			map[string]any{
@@ -1027,7 +1041,7 @@ func (al *AgentLoop) runLLMIteration(
 				"model":             activeModel,
 				"messages_count":    len(messages),
 				"tools_count":       len(providerToolDefs),
-				"max_tokens":        agent.MaxTokens,
+				"max_tokens":        effectiveMaxTokens,
 				"temperature":       agent.Temperature,
 				"system_prompt_len": len(messages[0].Content),
 			})
@@ -1045,7 +1059,7 @@ func (al *AgentLoop) runLLMIteration(
 		var err error
 
 		llmOpts := map[string]any{
-			"max_tokens":       agent.MaxTokens,
+			"max_tokens":       effectiveMaxTokens,
 			"temperature":      agent.Temperature,
 			"prompt_cache_key": agent.ID,
 		}
@@ -1724,13 +1738,24 @@ func (al *AgentLoop) retryLLMCall(
 		al.activeRequests.Add(1)
 		resp, err = func() (*providers.LLMResponse, error) {
 			defer al.activeRequests.Done()
+			summarizeMessages := []providers.Message{{Role: "user", Content: prompt}}
+			summarizeMaxTokens := agent.MaxTokens
+			if agent.ContextWindow > 0 {
+				remaining := agent.ContextWindow - al.estimateTokens(summarizeMessages)
+				if remaining < 1 {
+					remaining = 1
+				}
+				if remaining < summarizeMaxTokens {
+					summarizeMaxTokens = remaining
+				}
+			}
 			return agent.Provider.Chat(
 				ctx,
-				[]providers.Message{{Role: "user", Content: prompt}},
+				summarizeMessages,
 				nil,
 				agent.Model,
 				map[string]any{
-					"max_tokens":       agent.MaxTokens,
+					"max_tokens":       summarizeMaxTokens,
 					"temperature":      llmTemperature,
 					"prompt_cache_key": agent.ID,
 				},
@@ -1913,6 +1938,44 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance, opts *processOpt
 			agent.Sessions.SetSummary(opts.SessionKey, "")
 			agent.Sessions.Save(opts.SessionKey)
 			return nil
+		}
+
+		rt.GetContextInfo = func() (*commands.ContextInfo, error) {
+			if opts == nil || agent.Sessions == nil {
+				return nil, fmt.Errorf("session not available")
+			}
+			history := agent.Sessions.GetHistory(opts.SessionKey)
+			summary := agent.Sessions.GetSummary(opts.SessionKey)
+			return &commands.ContextInfo{
+				EstimatedTokens: al.estimateTokens(history),
+				ContextWindow:   agent.ContextWindow,
+				MaxOutputTokens: agent.MaxTokens,
+				MessageCount:    len(history),
+				HasSummary:      summary != "",
+			}, nil
+		}
+
+		rt.CompactHistory = func(ctx context.Context) (*commands.ContextInfo, error) {
+			if opts == nil || agent.Sessions == nil {
+				return nil, fmt.Errorf("session not available")
+			}
+			summarizeKey := agent.ID + ":" + opts.SessionKey
+			if _, loaded := al.summarizing.LoadOrStore(summarizeKey, true); loaded {
+				return nil, fmt.Errorf("summarization already in progress")
+			}
+			defer al.summarizing.Delete(summarizeKey)
+
+			al.summarizeSession(agent, opts.SessionKey)
+
+			history := agent.Sessions.GetHistory(opts.SessionKey)
+			summary := agent.Sessions.GetSummary(opts.SessionKey)
+			return &commands.ContextInfo{
+				EstimatedTokens: al.estimateTokens(history),
+				ContextWindow:   agent.ContextWindow,
+				MaxOutputTokens: agent.MaxTokens,
+				MessageCount:    len(history),
+				HasSummary:      summary != "",
+			}, nil
 		}
 	}
 	return rt

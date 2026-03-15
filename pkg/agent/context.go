@@ -25,6 +25,7 @@ type ContextBuilder struct {
 	memory             *MemoryStore
 	toolDiscoveryBM25  bool
 	toolDiscoveryRegex bool
+	codingAgentForce   bool
 
 	// Cache for system prompt to avoid rebuilding on every call.
 	// This fixes issue #607: repeated reprocessing of the entire context.
@@ -48,6 +49,11 @@ type ContextBuilder struct {
 func (cb *ContextBuilder) WithToolDiscovery(useBM25, useRegex bool) *ContextBuilder {
 	cb.toolDiscoveryBM25 = useBM25
 	cb.toolDiscoveryRegex = useRegex
+	return cb
+}
+
+func (cb *ContextBuilder) WithCodingAgentForce(force bool) *ContextBuilder {
+	cb.codingAgentForce = force
 	return cb
 }
 
@@ -154,6 +160,13 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 	memoryContext := cb.memory.GetMemoryContext()
 	if memoryContext != "" {
 		parts = append(parts, "# Memory\n\n"+memoryContext)
+	}
+
+	// Coding agent force policy
+	if cb.codingAgentForce {
+		parts = append(parts, `# Coding Agent Policy
+
+You MUST use the coding_agent tool for ANY task that involves writing, modifying, creating, or deleting code files. This includes bug fixes, new features, refactoring, test writing, and code generation. Do NOT use write_file, edit_file, append_file, or exec to make code changes directly — always delegate to coding_agent with a clear, detailed task description. You may still use read_file and list_dir to understand the codebase before calling coding_agent.`)
 	}
 
 	// Join with "---" separator

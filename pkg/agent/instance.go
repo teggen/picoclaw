@@ -96,6 +96,27 @@ func NewAgentInstance(
 		toolsRegistry.Register(tools.NewAppendFileTool(workspace, restrict, allowWritePaths))
 	}
 
+	if cfg.Tools.IsToolEnabled("coding_agent") {
+		caCfg := tools.CodingAgentToolConfig{
+			Backend:            cfg.Tools.CodingAgent.Backend,
+			Command:            cfg.Tools.CodingAgent.Command,
+			Model:              cfg.Tools.CodingAgent.Model,
+			Force:              cfg.Tools.CodingAgent.Force,
+			TimeoutSeconds:     cfg.Tools.CodingAgent.TimeoutSeconds,
+			MaxTurns:           cfg.Tools.CodingAgent.MaxTurns,
+			SessionContinuity:  cfg.Tools.CodingAgent.SessionContinuity,
+			Effort:             cfg.Tools.CodingAgent.Effort,
+			AppendSystemPrompt: cfg.Tools.CodingAgent.AppendSystemPrompt,
+			Worktree:           cfg.Tools.CodingAgent.Worktree,
+			Verbose:            cfg.Tools.CodingAgent.Verbose,
+		}
+		codingBackend := tools.NewCodingAgentBackendFromConfig(caCfg)
+		if codingBackend != nil && codingBackend.Available() {
+			caTool := tools.NewCodingAgentTool(codingBackend, workspace, caCfg)
+			toolsRegistry.Register(caTool)
+		}
+	}
+
 	sessionsDir := filepath.Join(workspace, "sessions")
 	sessions := initSessionStore(sessionsDir)
 
@@ -104,6 +125,10 @@ func NewAgentInstance(
 		mcpDiscoveryActive && cfg.Tools.MCP.Discovery.UseBM25,
 		mcpDiscoveryActive && cfg.Tools.MCP.Discovery.UseRegex,
 	)
+
+	if cfg.Tools.IsToolEnabled("coding_agent") && cfg.Tools.CodingAgent.Force {
+		contextBuilder.WithCodingAgentForce(true)
+	}
 
 	agentID := routing.DefaultAgentID
 	agentName := ""
@@ -125,6 +150,11 @@ func NewAgentInstance(
 	maxTokens := defaults.MaxTokens
 	if maxTokens == 0 {
 		maxTokens = 8192
+	}
+
+	contextWindow := defaults.ContextWindow
+	if contextWindow == 0 {
+		contextWindow = maxTokens
 	}
 
 	temperature := 0.7
@@ -224,7 +254,7 @@ func NewAgentInstance(
 		MaxTokens:                 maxTokens,
 		Temperature:               temperature,
 		ThinkingLevel:             thinkingLevel,
-		ContextWindow:             maxTokens,
+		ContextWindow:             contextWindow,
 		SummarizeMessageThreshold: summarizeMessageThreshold,
 		SummarizeTokenPercent:     summarizeTokenPercent,
 		Provider:                  provider,
