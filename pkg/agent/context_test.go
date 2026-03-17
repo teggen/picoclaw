@@ -1,9 +1,13 @@
 package agent
 
 import (
+	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/sipeed/picoclaw/pkg/providers"
+	"github.com/sipeed/picoclaw/pkg/tools"
 )
 
 func msg(role, content string) providers.Message {
@@ -205,6 +209,106 @@ func assertRoles(t *testing.T, msgs []providers.Message, expected ...string) {
 		if msgs[i].Role != exp {
 			t.Errorf("message[%d]: got role %q, want %q", i, msgs[i].Role, exp)
 		}
+	}
+}
+
+// stubTool is a minimal Tool implementation for tests.
+type stubTool struct {
+	name string
+	desc string
+}
+
+func (s *stubTool) Name() string        { return s.name }
+func (s *stubTool) Description() string { return s.desc }
+func (s *stubTool) Parameters() map[string]any {
+	return map[string]any{"type": "object", "properties": map[string]any{}}
+}
+func (s *stubTool) Execute(_ context.Context, _ map[string]any) *tools.ToolResult {
+	return tools.NewToolResult("ok")
+}
+
+// TestGetDiscoveryRule_NoRegistry verifies that discovery rule is empty when
+// discovery is disabled and no registry is set.
+func TestGetDiscoveryRule_NoRegistry(t *testing.T) {
+	cb := &ContextBuilder{}
+	if rule := cb.getDiscoveryRule(); rule != "" {
+		t.Fatalf("expected empty rule, got %q", rule)
+	}
+}
+
+// TestGetDiscoveryRule_WithHiddenTools verifies the catalogue is appended when
+// hidden tools are registered and discovery is enabled.
+func TestGetDiscoveryRule_WithHiddenTools(t *testing.T) {
+	reg := tools.NewToolRegistry()
+	reg.RegisterHidden(&stubTool{name: "mcp__my_server__do_thing", desc: "Does the thing"})
+	reg.RegisterHidden(&stubTool{name: "mcp__my_server__other", desc: "Does something else"})
+
+	cb := &ContextBuilder{
+		toolDiscoveryBM25: true,
+		toolRegistry:      reg,
+	}
+
+	rule := cb.getDiscoveryRule()
+	if !strings.Contains(rule, "Hidden tools available") {
+		t.Fatalf("expected hidden tool catalogue in rule, got:\n%s", rule)
+	}
+	if !strings.Contains(rule, "mcp__my_server__do_thing") {
+		t.Fatalf("expected tool name in rule, got:\n%s", rule)
+	}
+	if !strings.Contains(rule, "Does the thing") {
+		t.Fatalf("expected tool description in rule, got:\n%s", rule)
+	}
+}
+
+// TestGetDiscoveryRule_NoHiddenTools verifies that no catalogue is appended when
+// the registry is empty.
+func TestGetDiscoveryRule_NoHiddenTools(t *testing.T) {
+	reg := tools.NewToolRegistry()
+
+	cb := &ContextBuilder{
+		toolDiscoveryBM25: true,
+		toolRegistry:      reg,
+	}
+
+	rule := cb.getDiscoveryRule()
+	if strings.Contains(rule, "Hidden tools available") {
+		t.Fatalf("expected no catalogue when registry is empty, got:\n%s", rule)
+	}
+}
+
+// TestCacheInvalidatesOnRegistryVersionChange verifies that
+// sourceFilesChangedLocked returns true after new tools are registered.
+func TestCacheInvalidatesOnRegistryVersionChange(t *testing.T) {
+	reg := tools.NewToolRegistry()
+
+	cb := &ContextBuilder{
+		toolDiscoveryBM25: true,
+		toolRegistry:      reg,
+		// Simulate a pre-existing cache at the current version.
+		cachedRegVersion:   reg.Version(),
+		cachedSystemPrompt: "cached",
+		existedAtCache:     map[string]bool{},
+		skillFilesAtCache:  map[string]time.Time{},
+	}
+	// Need a non-zero cachedAt to pass the zero-time check.
+	cb.cachedAt = time.Unix(1, 0)
+
+	// Before any new registrations the cache should be valid.
+	cb.systemPromptMutex.RLock()
+	changed := cb.sourceFilesChangedLocked()
+	cb.systemPromptMutex.RUnlock()
+	if changed {
+		t.Fatal("expected cache to be valid before tool registration")
+	}
+
+	// Register a new hidden tool — bumps the registry version.
+	reg.RegisterHidden(&stubTool{name: "mcp__srv__new_tool", desc: "brand new"})
+
+	cb.systemPromptMutex.RLock()
+	changed = cb.sourceFilesChangedLocked()
+	cb.systemPromptMutex.RUnlock()
+	if !changed {
+		t.Fatal("expected cache to be invalid after tool registration")
 	}
 }
 

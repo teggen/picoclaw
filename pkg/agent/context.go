@@ -16,6 +16,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/providers"
 	"github.com/sipeed/picoclaw/pkg/skills"
+	"github.com/sipeed/picoclaw/pkg/tools"
 	"github.com/sipeed/picoclaw/pkg/utils"
 )
 
@@ -26,6 +27,8 @@ type ContextBuilder struct {
 	toolDiscoveryBM25  bool
 	toolDiscoveryRegex bool
 	codingAgentForce   bool
+	toolRegistry       *tools.ToolRegistry
+	cachedRegVersion   uint64
 
 	// Cache for system prompt to avoid rebuilding on every call.
 	// This fixes issue #607: repeated reprocessing of the entire context.
@@ -54,6 +57,11 @@ func (cb *ContextBuilder) WithToolDiscovery(useBM25, useRegex bool) *ContextBuil
 
 func (cb *ContextBuilder) WithCodingAgentForce(force bool) *ContextBuilder {
 	cb.codingAgentForce = force
+	return cb
+}
+
+func (cb *ContextBuilder) WithToolRegistry(r *tools.ToolRegistry) *ContextBuilder {
+	cb.toolRegistry = r
 	return cb
 }
 
@@ -128,10 +136,25 @@ func (cb *ContextBuilder) getDiscoveryRule() string {
 		toolNames = append(toolNames, `"tool_search_tool_regex"`)
 	}
 
-	return fmt.Sprintf(
+	rule := fmt.Sprintf(
 		`5. **Tool Discovery** - Your visible tools are limited to save memory, but a vast hidden library exists. If you lack the right tool for a task, BEFORE giving up, you MUST search using the %s tool. Do not refuse a request unless the search returns nothing. Found tools will temporarily unlock for your next turn.`,
 		strings.Join(toolNames, " or "),
 	)
+
+	if cb.toolRegistry != nil {
+		snapshot := cb.toolRegistry.SnapshotHiddenTools()
+		if len(snapshot.Docs) > 0 {
+			var sb strings.Builder
+			sb.WriteString(rule)
+			sb.WriteString("\n\n   Hidden tools available — search to unlock:\n")
+			for _, doc := range snapshot.Docs {
+				fmt.Fprintf(&sb, "   - %s: %s\n", doc.Name, doc.Description)
+			}
+			return strings.TrimRight(sb.String(), "\n")
+		}
+	}
+
+	return rule
 }
 
 func (cb *ContextBuilder) BuildSystemPrompt() string {
@@ -207,6 +230,9 @@ func (cb *ContextBuilder) BuildSystemPromptWithCache() string {
 	cb.cachedAt = baseline.maxMtime
 	cb.existedAtCache = baseline.existed
 	cb.skillFilesAtCache = baseline.skillFiles
+	if cb.toolRegistry != nil {
+		cb.cachedRegVersion = cb.toolRegistry.Version()
+	}
 
 	logger.DebugCF("agent", "System prompt cached",
 		map[string]any{
@@ -325,6 +351,11 @@ func (cb *ContextBuilder) buildCacheBaseline() cacheBaseline {
 // which already holds RLock or Lock).
 func (cb *ContextBuilder) sourceFilesChangedLocked() bool {
 	if cb.cachedAt.IsZero() {
+		return true
+	}
+
+	// Check if the tool registry version has changed (e.g. MCP tools registered after cache build).
+	if cb.toolRegistry != nil && cb.toolRegistry.Version() != cb.cachedRegVersion {
 		return true
 	}
 
