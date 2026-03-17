@@ -726,18 +726,18 @@ type MediaCleanupConfig struct {
 }
 
 type CodingAgentConfig struct {
-	ToolConfig        `                    envPrefix:"PICOCLAW_TOOLS_CODING_AGENT_"`
-	Backend           string `json:"backend"              env:"PICOCLAW_TOOLS_CODING_AGENT_BACKEND"`
-	Force             bool   `json:"force"                env:"PICOCLAW_TOOLS_CODING_AGENT_FORCE"`
-	TimeoutSeconds    int    `json:"timeout_seconds"      env:"PICOCLAW_TOOLS_CODING_AGENT_TIMEOUT_SECONDS"`
-	MaxTurns          int    `json:"max_turns"            env:"PICOCLAW_TOOLS_CODING_AGENT_MAX_TURNS"`
-	Command           string `json:"command"              env:"PICOCLAW_TOOLS_CODING_AGENT_COMMAND"`
-	Model             string `json:"model"                env:"PICOCLAW_TOOLS_CODING_AGENT_MODEL"`
-	SessionContinuity  bool   `json:"session_continuity"   env:"PICOCLAW_TOOLS_CODING_AGENT_SESSION_CONTINUITY"`
-	Effort             string `json:"effort"               env:"PICOCLAW_TOOLS_CODING_AGENT_EFFORT"`
-	AppendSystemPrompt string `json:"append_system_prompt"  env:"PICOCLAW_TOOLS_CODING_AGENT_APPEND_SYSTEM_PROMPT"`
-	Worktree           bool   `json:"worktree"             env:"PICOCLAW_TOOLS_CODING_AGENT_WORKTREE"`
-	Verbose            bool   `json:"verbose"              env:"PICOCLAW_TOOLS_CODING_AGENT_VERBOSE"`
+	ToolConfig         `       envPrefix:"PICOCLAW_TOOLS_CODING_AGENT_"`
+	Backend            string `                                         json:"backend"              env:"PICOCLAW_TOOLS_CODING_AGENT_BACKEND"`
+	Force              bool   `                                         json:"force"                env:"PICOCLAW_TOOLS_CODING_AGENT_FORCE"`
+	TimeoutSeconds     int    `                                         json:"timeout_seconds"      env:"PICOCLAW_TOOLS_CODING_AGENT_TIMEOUT_SECONDS"`
+	MaxTurns           int    `                                         json:"max_turns"            env:"PICOCLAW_TOOLS_CODING_AGENT_MAX_TURNS"`
+	Command            string `                                         json:"command"              env:"PICOCLAW_TOOLS_CODING_AGENT_COMMAND"`
+	Model              string `                                         json:"model"                env:"PICOCLAW_TOOLS_CODING_AGENT_MODEL"`
+	SessionContinuity  bool   `                                         json:"session_continuity"   env:"PICOCLAW_TOOLS_CODING_AGENT_SESSION_CONTINUITY"`
+	Effort             string `                                         json:"effort"               env:"PICOCLAW_TOOLS_CODING_AGENT_EFFORT"`
+	AppendSystemPrompt string `                                         json:"append_system_prompt" env:"PICOCLAW_TOOLS_CODING_AGENT_APPEND_SYSTEM_PROMPT"`
+	Worktree           bool   `                                         json:"worktree"             env:"PICOCLAW_TOOLS_CODING_AGENT_WORKTREE"`
+	Verbose            bool   `                                         json:"verbose"              env:"PICOCLAW_TOOLS_CODING_AGENT_VERBOSE"`
 }
 
 type ReadFileToolConfig struct {
@@ -769,6 +769,7 @@ type ToolsConfig struct {
 	WebFetch        ToolConfig         `json:"web_fetch"                                                envPrefix:"PICOCLAW_TOOLS_WEB_FETCH_"`
 	WriteFile       ToolConfig         `json:"write_file"                                               envPrefix:"PICOCLAW_TOOLS_WRITE_FILE_"`
 	CodingAgent     CodingAgentConfig  `json:"coding_agent"`
+	ConfigView      ToolConfig         `json:"config_view"                                              envPrefix:"PICOCLAW_TOOLS_CONFIG_VIEW_"`
 }
 
 type SearchCacheConfig struct {
@@ -1074,6 +1075,8 @@ func (t *ToolsConfig) IsToolEnabled(name string) bool {
 		return t.MCP.Enabled
 	case "coding_agent":
 		return t.CodingAgent.Enabled
+	case "config_view":
+		return t.ConfigView.Enabled
 	default:
 		return true
 	}

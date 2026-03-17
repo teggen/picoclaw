@@ -117,6 +117,10 @@ func NewAgentInstance(
 		}
 	}
 
+	if cfg.Tools.IsToolEnabled("config_view") {
+		toolsRegistry.Register(tools.NewConfigViewTool(cfg))
+	}
+
 	sessionsDir := filepath.Join(workspace, "sessions")
 	sessions := initSessionStore(sessionsDir)
 

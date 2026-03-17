@@ -531,6 +531,9 @@ func DefaultConfig() *Config {
 				TimeoutSeconds:    600,
 				SessionContinuity: true,
 			},
+			ConfigView: ToolConfig{
+				Enabled: true,
+			},
 		},
 		Heartbeat: HeartbeatConfig{
 			Enabled:  true,

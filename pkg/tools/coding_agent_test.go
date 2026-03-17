@@ -17,8 +17,8 @@ type mockCodingBackend struct {
 	err       error
 }
 
-func (m *mockCodingBackend) Name() string      { return m.name }
-func (m *mockCodingBackend) Available() bool    { return m.available }
+func (m *mockCodingBackend) Name() string    { return m.name }
+func (m *mockCodingBackend) Available() bool { return m.available }
 
 func (m *mockCodingBackend) Execute(_ context.Context, _ CodingAgentExecOpts) (*CodingAgentResult, error) {
 	return m.result, m.err
@@ -208,7 +208,11 @@ func TestCodingAgentTool_SessionID(t *testing.T) {
 		captured:           &capturedOpts,
 	}
 
-	tool := NewCodingAgentTool(wrappedBackend, "/tmp", CodingAgentToolConfig{TimeoutSeconds: 60, SessionContinuity: true})
+	tool := NewCodingAgentTool(
+		wrappedBackend,
+		"/tmp",
+		CodingAgentToolConfig{TimeoutSeconds: 60, SessionContinuity: true},
+	)
 
 	ctx := WithToolContext(context.Background(), "telegram", "chat123")
 	tool.Execute(ctx, map[string]any{"task": "do something"})
@@ -386,8 +390,12 @@ func (c *capturingBackend) Execute(ctx context.Context, opts CodingAgentExecOpts
 func TestCodingAgentTool_EffortFlag(t *testing.T) {
 	var capturedOpts CodingAgentExecOpts
 	backend := &capturingBackend{
-		CodingAgentBackend: &mockCodingBackend{name: "test", available: true, result: &CodingAgentResult{Summary: "done"}},
-		captured:           &capturedOpts,
+		CodingAgentBackend: &mockCodingBackend{
+			name:      "test",
+			available: true,
+			result:    &CodingAgentResult{Summary: "done"},
+		},
+		captured: &capturedOpts,
 	}
 
 	tool := NewCodingAgentTool(backend, "/tmp", CodingAgentToolConfig{TimeoutSeconds: 60, Effort: "high"})
@@ -401,8 +409,12 @@ func TestCodingAgentTool_EffortFlag(t *testing.T) {
 func TestCodingAgentTool_AppendSystemPromptDefault(t *testing.T) {
 	var capturedOpts CodingAgentExecOpts
 	backend := &capturingBackend{
-		CodingAgentBackend: &mockCodingBackend{name: "test", available: true, result: &CodingAgentResult{Summary: "done"}},
-		captured:           &capturedOpts,
+		CodingAgentBackend: &mockCodingBackend{
+			name:      "test",
+			available: true,
+			result:    &CodingAgentResult{Summary: "done"},
+		},
+		captured: &capturedOpts,
 	}
 
 	tool := NewCodingAgentTool(backend, "/tmp", CodingAgentToolConfig{TimeoutSeconds: 60})
@@ -413,15 +425,23 @@ func TestCodingAgentTool_AppendSystemPromptDefault(t *testing.T) {
 		t.Errorf("expected default prompt to mention PicoClaw, got %q", capturedOpts.AppendSystemPrompt)
 	}
 	if !strings.Contains(capturedOpts.AppendSystemPrompt, absPath) {
-		t.Errorf("expected default prompt to contain workspace path %q, got %q", absPath, capturedOpts.AppendSystemPrompt)
+		t.Errorf(
+			"expected default prompt to contain workspace path %q, got %q",
+			absPath,
+			capturedOpts.AppendSystemPrompt,
+		)
 	}
 }
 
 func TestCodingAgentTool_AppendSystemPromptCustom(t *testing.T) {
 	var capturedOpts CodingAgentExecOpts
 	backend := &capturingBackend{
-		CodingAgentBackend: &mockCodingBackend{name: "test", available: true, result: &CodingAgentResult{Summary: "done"}},
-		captured:           &capturedOpts,
+		CodingAgentBackend: &mockCodingBackend{
+			name:      "test",
+			available: true,
+			result:    &CodingAgentResult{Summary: "done"},
+		},
+		captured: &capturedOpts,
 	}
 
 	custom := "Custom system prompt for this project"
@@ -436,8 +456,12 @@ func TestCodingAgentTool_AppendSystemPromptCustom(t *testing.T) {
 func TestCodingAgentTool_WorktreeFlag(t *testing.T) {
 	var capturedOpts CodingAgentExecOpts
 	backend := &capturingBackend{
-		CodingAgentBackend: &mockCodingBackend{name: "test", available: true, result: &CodingAgentResult{Summary: "done"}},
-		captured:           &capturedOpts,
+		CodingAgentBackend: &mockCodingBackend{
+			name:      "test",
+			available: true,
+			result:    &CodingAgentResult{Summary: "done"},
+		},
+		captured: &capturedOpts,
 	}
 
 	tool := NewCodingAgentTool(backend, "/tmp", CodingAgentToolConfig{TimeoutSeconds: 60, Worktree: true})
@@ -451,8 +475,12 @@ func TestCodingAgentTool_WorktreeFlag(t *testing.T) {
 func TestCodingAgentTool_VerboseFlag(t *testing.T) {
 	var capturedOpts CodingAgentExecOpts
 	backend := &capturingBackend{
-		CodingAgentBackend: &mockCodingBackend{name: "test", available: true, result: &CodingAgentResult{Summary: "done"}},
-		captured:           &capturedOpts,
+		CodingAgentBackend: &mockCodingBackend{
+			name:      "test",
+			available: true,
+			result:    &CodingAgentResult{Summary: "done"},
+		},
+		captured: &capturedOpts,
 	}
 
 	tool := NewCodingAgentTool(backend, "/tmp", CodingAgentToolConfig{TimeoutSeconds: 60, Verbose: true})

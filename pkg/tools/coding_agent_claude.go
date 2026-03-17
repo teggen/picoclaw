@@ -128,16 +128,16 @@ func (b *ClaudeCodeBackend) Execute(ctx context.Context, opts CodingAgentExecOpt
 // claudeCodeJSONResponse represents the JSON output from the claude CLI.
 // Duplicated from providers/claude_cli_provider.go to avoid coupling tools → providers.
 type claudeCodeJSONResponse struct {
-	Type         string                 `json:"type"`
-	Subtype      string                 `json:"subtype"`
-	IsError      bool                   `json:"is_error"`
-	Result       string                 `json:"result"`
-	SessionID    string                 `json:"session_id"`
-	TotalCostUSD float64                `json:"total_cost_usd"`
-	DurationMS   int                    `json:"duration_ms"`
-	DurationAPI  int                    `json:"duration_api_ms"`
-	NumTurns     int                    `json:"num_turns"`
-	Usage        claudeCodeUsageInfo    `json:"usage"`
+	Type         string              `json:"type"`
+	Subtype      string              `json:"subtype"`
+	IsError      bool                `json:"is_error"`
+	Result       string              `json:"result"`
+	SessionID    string              `json:"session_id"`
+	TotalCostUSD float64             `json:"total_cost_usd"`
+	DurationMS   int                 `json:"duration_ms"`
+	DurationAPI  int                 `json:"duration_api_ms"`
+	NumTurns     int                 `json:"num_turns"`
+	Usage        claudeCodeUsageInfo `json:"usage"`
 }
 
 // claudeCodeUsageInfo represents token usage from the claude CLI response.

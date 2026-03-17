@@ -182,7 +182,6 @@ func (t *CodingAgentTool) Execute(ctx context.Context, args map[string]any) *Too
 		Worktree:           t.worktree,
 		Verbose:            t.verbose,
 	})
-
 	if err != nil {
 		if execCtx.Err() == context.DeadlineExceeded {
 			return &ToolResult{
@@ -207,7 +206,10 @@ func (t *CodingAgentTool) Execute(ctx context.Context, args map[string]any) *Too
 	if result.IsError {
 		partialOutput := ""
 		if result.RawOutput != "" {
-			partialOutput = fmt.Sprintf("\n  <partial_output>%s</partial_output>", xmlEscape(truncateString(result.RawOutput, 10000)))
+			partialOutput = fmt.Sprintf(
+				"\n  <partial_output>%s</partial_output>",
+				xmlEscape(truncateString(result.RawOutput, 10000)),
+			)
 		}
 		return &ToolResult{
 			ForLLM: fmt.Sprintf(
