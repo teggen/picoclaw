@@ -13,9 +13,10 @@ import (
 )
 
 type ToolEntry struct {
-	Tool   Tool
-	IsCore bool
-	TTL    int
+	Tool       Tool
+	IsCore     bool
+	TTL        int
+	InitialTTL int // TTL value set at promotion time; used to reset TTL when the tool is called
 }
 
 type ToolRegistry struct {
@@ -75,6 +76,7 @@ func (r *ToolRegistry) PromoteTools(names []string, ttl int) {
 		if entry, exists := r.tools[name]; exists {
 			if !entry.IsCore {
 				entry.TTL = ttl
+				entry.InitialTTL = ttl
 				promoted++
 			}
 		}
@@ -92,6 +94,25 @@ func (r *ToolRegistry) TickTTL() {
 	defer r.mu.Unlock()
 	for _, entry := range r.tools {
 		if !entry.IsCore && entry.TTL > 0 {
+			entry.TTL--
+		}
+	}
+}
+
+// TickTTLExcept decreases TTL for non-core tools, but resets the TTL back to
+// InitialTTL for any tool whose name appears in usedTools. Tools that were
+// called this iteration are kept alive at full strength; all others tick down
+// normally.
+func (r *ToolRegistry) TickTTLExcept(usedTools map[string]bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for name, entry := range r.tools {
+		if entry.IsCore || entry.TTL <= 0 {
+			continue
+		}
+		if usedTools[name] {
+			entry.TTL = entry.InitialTTL
+		} else {
 			entry.TTL--
 		}
 	}

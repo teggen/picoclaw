@@ -335,6 +335,90 @@ func TestToolToSchema(t *testing.T) {
 	}
 }
 
+func TestToolRegistry_TickTTLExcept_ResetsUsedTools(t *testing.T) {
+	r := NewToolRegistry()
+	r.RegisterHidden(newMockTool("h1", "hidden one"))
+	r.RegisterHidden(newMockTool("h2", "hidden two"))
+	r.PromoteTools([]string{"h1", "h2"}, 5)
+
+	// Tick with h1 used: h1 resets to InitialTTL (5), h2 decrements to 4.
+	r.TickTTLExcept(map[string]bool{"h1": true})
+
+	h1, ok := r.Get("h1")
+	if !ok {
+		t.Fatal("h1 should still be visible after reset")
+	}
+	if h1.Name() != "h1" {
+		t.Errorf("unexpected tool name %q", h1.Name())
+	}
+
+	// h2 should still be accessible (TTL=4 > 0).
+	if _, ok := r.Get("h2"); !ok {
+		t.Fatal("h2 should still be visible at TTL=4")
+	}
+
+	// Drain h2 to zero — it should disappear after 4 more ticks.
+	for range 4 {
+		r.TickTTLExcept(map[string]bool{})
+	}
+	if _, ok := r.Get("h2"); ok {
+		t.Error("h2 should be hidden after TTL expired")
+	}
+
+	// h1 was reset to 5; after 4 ticks it still has TTL=1 and must be visible.
+	if _, ok := r.Get("h1"); !ok {
+		t.Error("h1 should still be visible (TTL=1)")
+	}
+}
+
+func TestToolRegistry_TickTTLExcept_DecrementsUnusedTools(t *testing.T) {
+	r := NewToolRegistry()
+	r.RegisterHidden(newMockTool("h", "hidden"))
+	r.PromoteTools([]string{"h"}, 3)
+
+	r.TickTTLExcept(map[string]bool{}) // TTL: 3→2
+	r.TickTTLExcept(map[string]bool{}) // TTL: 2→1
+	r.TickTTLExcept(map[string]bool{}) // TTL: 1→0
+
+	if _, ok := r.Get("h"); ok {
+		t.Error("h should be hidden after TTL expired")
+	}
+}
+
+func TestToolRegistry_TickTTLExcept_CoreToolsUnaffected(t *testing.T) {
+	r := NewToolRegistry()
+	r.Register(newMockTool("core", "always visible"))
+
+	// TickTTLExcept must never affect core tools.
+	r.TickTTLExcept(map[string]bool{})
+	r.TickTTLExcept(map[string]bool{})
+
+	if _, ok := r.Get("core"); !ok {
+		t.Error("core tool must remain visible regardless of TTL ticks")
+	}
+}
+
+func TestToolRegistry_PromoteTools_SetsInitialTTL(t *testing.T) {
+	r := NewToolRegistry()
+	r.RegisterHidden(newMockTool("h", "hidden"))
+	r.PromoteTools([]string{"h"}, 7)
+
+	// Deplete TTL partially.
+	r.TickTTLExcept(map[string]bool{}) // 7→6
+	r.TickTTLExcept(map[string]bool{}) // 6→5
+
+	// Use the tool — TTL should reset to InitialTTL (7), not stay at 5.
+	r.TickTTLExcept(map[string]bool{"h": true})
+
+	// After reset, 7 ticks are needed to expire it.
+	for range 7 {
+		r.TickTTLExcept(map[string]bool{})
+	}
+	if _, ok := r.Get("h"); ok {
+		t.Error("h should be hidden after 7 ticks post-reset")
+	}
+}
+
 func TestToolRegistry_ConcurrentAccess(t *testing.T) {
 	r := NewToolRegistry()
 	var wg sync.WaitGroup

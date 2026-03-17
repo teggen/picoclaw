@@ -1406,7 +1406,14 @@ func (al *AgentLoop) runLLMIteration(
 		// NOTE: This is safe because processMessage is sequential per agent.
 		// If per-agent concurrency is added, TTL consistency between
 		// ToProviderDefs and Get must be re-evaluated.
-		agent.Tools.TickTTL()
+		//
+		// Tools that were actually called this iteration are excluded from the
+		// tick: using a promoted hidden tool must not consume a TTL slot.
+		calledTools := make(map[string]bool, len(agentResults))
+		for _, r := range agentResults {
+			calledTools[r.tc.Name] = true
+		}
+		agent.Tools.TickTTLExcept(calledTools)
 		logger.DebugCF("agent", "TTL tick after tool execution", map[string]any{
 			"agent_id": agent.ID, "iteration": iteration,
 		})
