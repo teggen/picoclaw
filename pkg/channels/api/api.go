@@ -165,8 +165,8 @@ func (c *APIChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	sessionID := strings.TrimPrefix(msg.ChatID, "api:")
 
 	logger.DebugCF("api", "Send called", map[string]any{
-		"chat_id":    msg.ChatID,
-		"session_id": sessionID,
+		"chat_id":     msg.ChatID,
+		"session_id":  sessionID,
 		"content_len": len(msg.Content),
 	})
 

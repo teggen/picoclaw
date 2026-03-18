@@ -1,0 +1,39 @@
+[Unit]
+Description=PicoClaw AI Assistant Gateway
+Documentation=https://github.com/sipeed/picoclaw
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=openclaw
+Group=openclaw
+WorkingDirectory=/var/lib/picoclaw
+Environment=PICOCLAW_HOME=/var/lib/picoclaw
+ExecStart=/usr/local/bin/picoclaw gateway
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=picoclaw
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+ReadWritePaths=/var/lib/picoclaw
+
+[Install]
+WantedBy=multi-user.target

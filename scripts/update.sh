@@ -40,9 +40,17 @@ mv "$TMPBIN" "$INSTALL_BIN"
 if systemctl is-active --quiet picoclaw 2>/dev/null; then
     echo "Restarting picoclaw service..."
     systemctl restart picoclaw
+else
+    echo "Note: picoclaw service is not currently active; skipping restart."
 fi
 
 echo ""
 echo "=== PicoClaw updated successfully ==="
 echo ""
-echo "  View logs: journalctl -u picoclaw -f"
+
+# --- Post-update health check ---
+echo "Service status:"
+systemctl status picoclaw --no-pager || true
+echo ""
+echo "Recent logs:"
+journalctl -u picoclaw -n 20 --no-pager || true
