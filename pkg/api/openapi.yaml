@@ -1,0 +1,389 @@
+openapi: "3.0.3"
+info:
+  title: PicoClaw Gateway API
+  description: HTTP and WebSocket API for the PicoClaw AI assistant gateway.
+  version: "1.0.0"
+servers:
+  - url: /api/v1
+    description: Gateway server
+paths:
+  /chat:
+    post:
+      summary: Send a chat message (synchronous)
+      operationId: chatSync
+      tags: [Chat]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: Chat response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+        '400':
+          description: Invalid request
+        '504':
+          description: Timeout
+  /chat/stream:
+    post:
+      summary: Send a chat message (SSE streaming)
+      operationId: chatStream
+      tags: [Chat]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: SSE event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+  /chat/ws:
+    get:
+      summary: WebSocket chat endpoint
+      operationId: chatWebSocket
+      tags: [Chat]
+      parameters:
+        - name: session_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '101':
+          description: WebSocket upgrade
+  /status:
+    get:
+      summary: Gateway status
+      operationId: getStatus
+      tags: [State]
+      responses:
+        '200':
+          description: Status info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+  /channels:
+    get:
+      summary: Enabled channels
+      operationId: getChannels
+      tags: [State]
+      responses:
+        '200':
+          description: Channel list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChannelInfo'
+  /agents:
+    get:
+      summary: Registered agents
+      operationId: getAgents
+      tags: [State]
+      responses:
+        '200':
+          description: Agent list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentInfo'
+  /agents/{id}:
+    get:
+      summary: Agent details
+      operationId: getAgentByID
+      tags: [State]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentDetail'
+        '404':
+          description: Agent not found
+  /tools:
+    get:
+      summary: Live tool registry
+      operationId: getTools
+      tags: [State]
+      responses:
+        '200':
+          description: Tool list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ToolInfo'
+  /sessions:
+    get:
+      summary: List sessions
+      operationId: listSessions
+      tags: [Sessions]
+      parameters:
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Session list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SessionListItem'
+  /sessions/{id}:
+    get:
+      summary: Session message history
+      operationId: getSession
+      tags: [Sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Session detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionDetail'
+        '404':
+          description: Session not found
+    delete:
+      summary: Delete a session
+      operationId: deleteSession
+      tags: [Sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          description: Session not found
+  /config:
+    get:
+      summary: Read current config
+      operationId: getConfig
+      tags: [Configuration]
+      responses:
+        '200':
+          description: Current configuration
+          content:
+            application/json:
+              schema:
+                type: object
+    put:
+      summary: Replace config (triggers hot reload)
+      operationId: putConfig
+      tags: [Configuration]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Config replaced
+        '400':
+          description: Invalid config
+    patch:
+      summary: Partial config update (JSON merge patch)
+      operationId: patchConfig
+      tags: [Configuration]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Config updated
+        '400':
+          description: Invalid patch
+  /events/ws:
+    get:
+      summary: Real-time state change events (WebSocket)
+      operationId: eventsWebSocket
+      tags: [Events]
+      responses:
+        '101':
+          description: WebSocket upgrade
+  /openapi.yaml:
+    get:
+      summary: OpenAPI specification
+      operationId: getOpenAPISpec
+      tags: [Documentation]
+      responses:
+        '200':
+          description: OpenAPI 3.0 spec
+          content:
+            application/x-yaml:
+              schema:
+                type: string
+  /docs:
+    get:
+      summary: Swagger UI
+      operationId: getSwaggerUI
+      tags: [Documentation]
+      responses:
+        '301':
+          description: Redirect to /docs/
+components:
+  schemas:
+    ChatRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+        session_id:
+          type: string
+    ChatResponse:
+      type: object
+      properties:
+        response:
+          type: string
+        session_id:
+          type: string
+    Status:
+      type: object
+      properties:
+        status:
+          type: string
+        uptime:
+          type: string
+        model:
+          type: string
+        channels:
+          type: array
+          items:
+            type: string
+        tools:
+          type: object
+        agents:
+          type: object
+        skills:
+          type: object
+    ChannelInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        enabled:
+          type: boolean
+    AgentInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        model:
+          type: string
+        max_iterations:
+          type: integer
+        max_tokens:
+          type: integer
+    AgentDetail:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        model:
+          type: string
+        max_iterations:
+          type: integer
+        max_tokens:
+          type: integer
+        temperature:
+          type: number
+        tools:
+          type: array
+          items:
+            type: string
+    ToolInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        parameters:
+          type: object
+    SessionListItem:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        preview:
+          type: string
+        message_count:
+          type: integer
+        created:
+          type: string
+          format: date-time
+        updated:
+          type: string
+          format: date-time
+    SessionDetail:
+      type: object
+      properties:
+        id:
+          type: string
+        messages:
+          type: array
+          items:
+            type: object
+            properties:
+              role:
+                type: string
+              content:
+                type: string
+        summary:
+          type: string
+        created:
+          type: string
+          format: date-time
+        updated:
+          type: string
+          format: date-time

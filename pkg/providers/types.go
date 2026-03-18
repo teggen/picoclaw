@@ -19,6 +19,7 @@ type (
 	GoogleExtra            = protocoltypes.GoogleExtra
 	ContentBlock           = protocoltypes.ContentBlock
 	CacheControl           = protocoltypes.CacheControl
+	StreamEvent            = protocoltypes.StreamEvent
 )
 
 type LLMProvider interface {
@@ -79,6 +80,20 @@ func (e *FailoverError) Unwrap() error {
 // Non-retriable: Format errors (bad request structure, image dimension/size).
 func (e *FailoverError) IsRetriable() bool {
 	return e.Reason != FailoverFormat
+}
+
+// StreamingProvider is an optional interface for providers that support
+// streaming token-by-token responses. The callback receives incremental
+// deltas; the final *LLMResponse is returned as usual when the stream ends.
+type StreamingProvider interface {
+	ChatStream(
+		ctx context.Context,
+		messages []Message,
+		tools []ToolDefinition,
+		model string,
+		options map[string]any,
+		callback func(StreamEvent),
+	) (*LLMResponse, error)
 }
 
 // ModelConfig holds primary model and fallback list.

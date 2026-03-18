@@ -129,6 +129,55 @@ func (p *Provider) chatStreaming(
 	return parseResponse(&msg), nil
 }
 
+// ChatStream implements providers.StreamingProvider. It calls the Anthropic streaming API
+// and emits delta events to the callback as text tokens arrive.
+func (p *Provider) ChatStream(
+	ctx context.Context,
+	messages []Message,
+	tools []ToolDefinition,
+	model string,
+	options map[string]any,
+	callback func(protocoltypes.StreamEvent),
+) (*LLMResponse, error) {
+	var opts []option.RequestOption
+	if p.tokenSource != nil {
+		tok, err := p.tokenSource()
+		if err != nil {
+			return nil, fmt.Errorf("refreshing token: %w", err)
+		}
+		opts = append(opts,
+			option.WithAuthToken(tok),
+			option.WithHeader("anthropic-beta", anthropicBetaHeader),
+		)
+	}
+
+	params, err := buildParams(messages, tools, model, options)
+	if err != nil {
+		return nil, err
+	}
+
+	stream := p.client.Messages.NewStreaming(ctx, params, opts...)
+	defer stream.Close()
+
+	var msg anthropic.Message
+	for stream.Next() {
+		event := stream.Current()
+		if err := msg.Accumulate(event); err != nil {
+			return nil, fmt.Errorf("claude streaming accumulate: %w", err)
+		}
+		// Emit text deltas to the callback.
+		if event.Type == "content_block_delta" && event.Delta.Type == "text_delta" {
+			callback(protocoltypes.StreamEvent{Type: "delta", Content: event.Delta.Text})
+		}
+	}
+	if err := stream.Err(); err != nil {
+		return nil, fmt.Errorf("claude API call: %w", err)
+	}
+
+	callback(protocoltypes.StreamEvent{Type: "done", Content: ""})
+	return parseResponse(&msg), nil
+}
+
 func (p *Provider) GetDefaultModel() string {
 	return "claude-sonnet-4.6"
 }

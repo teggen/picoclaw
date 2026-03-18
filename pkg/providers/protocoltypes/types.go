@@ -82,3 +82,9 @@ type ToolFunctionDefinition struct {
 	Description string         `json:"description"`
 	Parameters  map[string]any `json:"parameters"`
 }
+
+// StreamEvent represents a streaming delta from an LLM provider.
+type StreamEvent struct {
+	Type    string // "delta", "tool_start", "tool_end", "done"
+	Content string
+}

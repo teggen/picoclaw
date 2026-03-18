@@ -307,6 +307,10 @@ func (m *Manager) initChannels() error {
 		m.initChannel("irc", "IRC")
 	}
 
+	if m.config.Channels.API.Enabled {
+		m.initChannel("api", "API")
+	}
+
 	logger.InfoCF("channels", "Channel initialization completed", map[string]any{
 		"enabled_channels": len(m.channels),
 	})
@@ -317,7 +321,8 @@ func (m *Manager) initChannels() error {
 // SetupHTTPServer creates a shared HTTP server with the given listen address.
 // It registers health endpoints from the health server and discovers channels
 // that implement WebhookHandler and/or HealthChecker to register their handlers.
-func (m *Manager) SetupHTTPServer(addr string, healthServer *health.Server) {
+// Optional extra functions can register additional routes on the shared mux.
+func (m *Manager) SetupHTTPServer(addr string, healthServer *health.Server, extras ...func(*http.ServeMux)) {
 	m.mux = http.NewServeMux()
 
 	// Register health endpoints
@@ -341,6 +346,11 @@ func (m *Manager) SetupHTTPServer(addr string, healthServer *health.Server) {
 				"path":    hc.HealthPath(),
 			})
 		}
+	}
+
+	// Register extra route handlers (e.g. API handler).
+	for _, extra := range extras {
+		extra(m.mux)
 	}
 
 	m.httpServer = &http.Server{

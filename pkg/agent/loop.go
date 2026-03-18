@@ -55,15 +55,16 @@ type AgentLoop struct {
 
 // processOptions configures how a message is processed
 type processOptions struct {
-	SessionKey      string   // Session identifier for history/context
-	Channel         string   // Target channel for tool execution
-	ChatID          string   // Target chat ID for tool execution
-	UserMessage     string   // User message content (may include prefix)
-	Media           []string // media:// refs from inbound message
-	DefaultResponse string   // Response when LLM returns empty
-	EnableSummary   bool     // Whether to trigger summarization
-	SendResponse    bool     // Whether to send response via bus
-	NoHistory       bool     // If true, don't load session history (for heartbeat)
+	SessionKey      string                      // Session identifier for history/context
+	Channel         string                      // Target channel for tool execution
+	ChatID          string                      // Target chat ID for tool execution
+	UserMessage     string                      // User message content (may include prefix)
+	Media           []string                    // media:// refs from inbound message
+	DefaultResponse string                      // Response when LLM returns empty
+	EnableSummary   bool                        // Whether to trigger summarization
+	SendResponse    bool                        // Whether to send response via bus
+	NoHistory       bool                        // If true, don't load session history (for heartbeat)
+	StreamCallback  func(providers.StreamEvent) // Optional callback for streaming deltas
 }
 
 const (
@@ -1077,6 +1078,13 @@ func (al *AgentLoop) runLLMIteration(
 		callLLM := func() (*providers.LLMResponse, error) {
 			al.activeRequests.Add(1)
 			defer al.activeRequests.Done()
+
+			// Use streaming provider when a stream callback is set and the provider supports it.
+			if opts.StreamCallback != nil {
+				if sp, ok := agent.Provider.(providers.StreamingProvider); ok {
+					return sp.ChatStream(ctx, messages, providerToolDefs, activeModel, llmOpts, opts.StreamCallback)
+				}
+			}
 
 			if len(activeCandidates) > 1 && al.fallback != nil {
 				fbResult, fbErr := al.fallback.Execute(

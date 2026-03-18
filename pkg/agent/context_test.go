@@ -223,6 +223,7 @@ func (s *stubTool) Description() string { return s.desc }
 func (s *stubTool) Parameters() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{}}
 }
+
 func (s *stubTool) Execute(_ context.Context, _ map[string]any) *tools.ToolResult {
 	return tools.NewToolResult("ok")
 }

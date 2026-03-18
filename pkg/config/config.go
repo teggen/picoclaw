@@ -272,6 +272,7 @@ type ChannelsConfig struct {
 	WeComAIBot WeComAIBotConfig `json:"wecom_aibot"`
 	Pico       PicoConfig       `json:"pico"`
 	IRC        IRCConfig        `json:"irc"`
+	API        APIConfig        `json:"api"`
 }
 
 // GroupTriggerConfig controls when the bot responds in group chats.
@@ -470,6 +471,15 @@ type PicoConfig struct {
 	MaxConnections  int                 `json:"max_connections,omitempty"`
 	AllowFrom       FlexibleStringSlice `json:"allow_from"                  env:"PICOCLAW_CHANNELS_PICO_ALLOW_FROM"`
 	Placeholder     PlaceholderConfig   `json:"placeholder,omitempty"`
+}
+
+type APIConfig struct {
+	Enabled        bool                `json:"enabled"                   env:"PICOCLAW_CHANNELS_API_ENABLED"`
+	AllowOrigins   []string            `json:"allow_origins,omitempty"`
+	PingInterval   int                 `json:"ping_interval,omitempty"`
+	ReadTimeout    int                 `json:"read_timeout,omitempty"`
+	MaxConnections int                 `json:"max_connections,omitempty"`
+	AllowFrom      FlexibleStringSlice `json:"allow_from"                env:"PICOCLAW_CHANNELS_API_ALLOW_FROM"`
 }
 
 type IRCConfig struct {

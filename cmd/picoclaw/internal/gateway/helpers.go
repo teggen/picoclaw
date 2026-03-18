@@ -11,8 +11,10 @@ import (
 
 	"github.com/sipeed/picoclaw/cmd/picoclaw/internal"
 	"github.com/sipeed/picoclaw/pkg/agent"
+	picoapi "github.com/sipeed/picoclaw/pkg/api"
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/channels"
+	_ "github.com/sipeed/picoclaw/pkg/channels/api"
 	_ "github.com/sipeed/picoclaw/pkg/channels/dingtalk"
 	_ "github.com/sipeed/picoclaw/pkg/channels/discord"
 	_ "github.com/sipeed/picoclaw/pkg/channels/feishu"
@@ -233,16 +235,23 @@ func setupAndStartServices(
 		fmt.Println("⚠ Warning: No channels enabled")
 	}
 
-	// Setup shared HTTP server with health endpoints and webhook handlers
+	// Create API handler for state/config/docs endpoints
+	configPath := internal.GetConfigPath()
+	apiHandler := picoapi.NewHandler(agentLoop, services.ChannelManager, configPath)
+
+	// Setup shared HTTP server with health endpoints, webhook handlers, and API routes
 	addr := fmt.Sprintf("%s:%d", cfg.Gateway.Host, cfg.Gateway.Port)
 	services.HealthServer = health.NewServer(cfg.Gateway.Host, cfg.Gateway.Port)
-	services.ChannelManager.SetupHTTPServer(addr, services.HealthServer)
+	services.ChannelManager.SetupHTTPServer(addr, services.HealthServer, apiHandler.RegisterRoutes)
 
 	if err := services.ChannelManager.StartAll(context.Background()); err != nil {
 		return nil, fmt.Errorf("error starting channels: %w", err)
 	}
 
 	fmt.Printf("✓ Health endpoints available at http://%s:%d/health and /ready\n", cfg.Gateway.Host, cfg.Gateway.Port)
+	if cfg.Channels.API.Enabled {
+		fmt.Printf("✓ API available at http://%s:%d/api/v1/\n", cfg.Gateway.Host, cfg.Gateway.Port)
+	}
 
 	// Setup state manager and device service
 	stateManager := state.NewManager(cfg.WorkspacePath())
@@ -472,10 +481,14 @@ func restartServices(
 		fmt.Println("  ⚠ Warning: No channels enabled")
 	}
 
+	// Create API handler for state/config/docs endpoints
+	configPath := internal.GetConfigPath()
+	apiHandler := picoapi.NewHandler(al, services.ChannelManager, configPath)
+
 	// Setup HTTP server with new config
 	addr := fmt.Sprintf("%s:%d", cfg.Gateway.Host, cfg.Gateway.Port)
 	services.HealthServer = health.NewServer(cfg.Gateway.Host, cfg.Gateway.Port)
-	services.ChannelManager.SetupHTTPServer(addr, services.HealthServer)
+	services.ChannelManager.SetupHTTPServer(addr, services.HealthServer, apiHandler.RegisterRoutes)
 
 	if err := services.ChannelManager.StartAll(ctx); err != nil {
 		return fmt.Errorf("error restarting channels: %w", err)
