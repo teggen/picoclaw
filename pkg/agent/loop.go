@@ -684,6 +684,15 @@ func (al *AgentLoop) ProcessHeartbeat(
 	if agent == nil {
 		return "", fmt.Errorf("no default agent for heartbeat")
 	}
+
+	// Disable the message tool during heartbeat to prevent unsolicited messages
+	if tool, ok := agent.Tools.Get("message"); ok {
+		if mt, ok := tool.(*tools.MessageTool); ok {
+			mt.SetDisabled(true)
+			defer mt.SetDisabled(false)
+		}
+	}
+
 	return al.runAgentLoop(ctx, agent, processOptions{
 		SessionKey:      "heartbeat",
 		Channel:         channel,
@@ -872,17 +881,19 @@ func (al *AgentLoop) processSystemMessage(
 		return "", fmt.Errorf("no default agent for system message")
 	}
 
-	// Use the origin session for context
-	sessionKey := routing.BuildAgentMainSessionKey(agent.ID)
-
+	// System messages (subagent results, async completions) are self-contained:
+	// the full result is in msg.Content. Loading session history would risk
+	// sending stale tool_call_ids from prior models, causing provider errors
+	// (e.g. Mistral rejecting OpenAI-format tool_call_ids after a model switch).
 	return al.runAgentLoop(ctx, agent, processOptions{
-		SessionKey:      sessionKey,
+		SessionKey:      "system_message",
 		Channel:         originChannel,
 		ChatID:          originChatID,
 		UserMessage:     fmt.Sprintf("[System: %s] %s", msg.SenderID, msg.Content),
 		DefaultResponse: "Background task completed.",
 		EnableSummary:   false,
 		SendResponse:    true,
+		NoHistory:       true,
 	})
 }
 
@@ -1174,16 +1185,30 @@ func (al *AgentLoop) runLLMIteration(
 				strings.Contains(errMsg, "timed out") ||
 				strings.Contains(errMsg, "timeout exceeded")
 
+			// Detect tool_call_id errors: providers may reject historical tool call
+			// IDs from a different model/provider (e.g. OpenAI-format IDs sent to Mistral).
+			// Recovery: strip all tool call exchanges from history and retry.
+			isToolCallIDError := strings.Contains(errMsg, "tool call id") ||
+				strings.Contains(errMsg, "tool_call_id")
+
 			// Detect real context window / token limit errors, excluding network timeouts.
-			isContextError := !isTimeoutError && (strings.Contains(errMsg, "context_length_exceeded") ||
-				strings.Contains(errMsg, "context window") ||
-				strings.Contains(errMsg, "maximum context length") ||
-				strings.Contains(errMsg, "token limit") ||
-				strings.Contains(errMsg, "too many tokens") ||
-				strings.Contains(errMsg, "max_tokens") ||
-				strings.Contains(errMsg, "invalidparameter") ||
-				strings.Contains(errMsg, "prompt is too long") ||
-				strings.Contains(errMsg, "request too large"))
+			isContextError := !isTimeoutError && !isToolCallIDError &&
+				(strings.Contains(errMsg, "context_length_exceeded") ||
+					strings.Contains(errMsg, "context window") ||
+					strings.Contains(errMsg, "maximum context length") ||
+					strings.Contains(errMsg, "token limit") ||
+					strings.Contains(errMsg, "too many tokens") ||
+					strings.Contains(errMsg, "max_tokens") ||
+					strings.Contains(errMsg, "invalidparameter") ||
+					strings.Contains(errMsg, "prompt is too long") ||
+					strings.Contains(errMsg, "request too large"))
+
+			if isToolCallIDError && retry < maxRetries {
+				logger.WarnCF("agent", "Tool call ID error, stripping tool exchanges from history",
+					map[string]any{"error": err.Error(), "retry": retry})
+				messages = stripToolCallExchanges(messages)
+				continue
+			}
 
 			if isTimeoutError && retry < maxRetries {
 				backoff := time.Duration(retry+1) * 5 * time.Second
@@ -1488,6 +1513,23 @@ func (al *AgentLoop) runLLMIteration(
 	}
 
 	return finalContent, iteration, nil
+}
+
+// stripToolCallExchanges removes all assistant messages with tool_calls and their
+// associated tool result messages from the message list. This is used as a recovery
+// strategy when a provider rejects historical tool_call_ids (e.g. after a model switch).
+func stripToolCallExchanges(messages []providers.Message) []providers.Message {
+	result := make([]providers.Message, 0, len(messages))
+	for _, msg := range messages {
+		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
+			continue
+		}
+		if msg.Role == "tool" {
+			continue
+		}
+		result = append(result, msg)
+	}
+	return result
 }
 
 // selectCandidates returns the model candidates and resolved model name to use

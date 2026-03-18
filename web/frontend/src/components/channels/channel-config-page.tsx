@@ -156,8 +156,6 @@ function isConfigured(
       return asBool(config.use_native)
     case "pico":
       return asString(config.token) !== ""
-    case "maixcam":
-      return asString(config.host) !== ""
     case "matrix":
       return (
         asString(config.homeserver) !== "" &&
@@ -199,8 +197,6 @@ function getRequiredFieldKeys(channelName: string): string[] {
       return ["bridge_url"]
     case "pico":
       return ["token"]
-    case "maixcam":
-      return ["host"]
     case "matrix":
       return ["homeserver", "user_id", "access_token"]
     case "irc":

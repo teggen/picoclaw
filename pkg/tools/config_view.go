@@ -135,7 +135,6 @@ func (t *ConfigViewTool) channels() string {
 		{"telegram", ch.Telegram.Enabled},
 		{"feishu", ch.Feishu.Enabled},
 		{"discord", ch.Discord.Enabled},
-		{"maixcam", ch.MaixCam.Enabled},
 		{"qq", ch.QQ.Enabled},
 		{"dingtalk", ch.DingTalk.Enabled},
 		{"slack", ch.Slack.Enabled},
@@ -283,7 +282,7 @@ func (t *ConfigViewTool) countEnabledChannels() int {
 	ch := t.cfg.Channels
 	for _, enabled := range []bool{
 		ch.WhatsApp.Enabled, ch.Telegram.Enabled, ch.Feishu.Enabled,
-		ch.Discord.Enabled, ch.MaixCam.Enabled, ch.QQ.Enabled,
+		ch.Discord.Enabled, ch.QQ.Enabled,
 		ch.DingTalk.Enabled, ch.Slack.Enabled, ch.Matrix.Enabled,
 		ch.LINE.Enabled, ch.OneBot.Enabled, ch.WeCom.Enabled,
 		ch.WeComApp.Enabled, ch.WeComAIBot.Enabled, ch.Pico.Enabled,

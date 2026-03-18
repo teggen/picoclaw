@@ -241,9 +241,10 @@ func (hs *HeartbeatService) buildPrompt() string {
 
 Current time: %s
 
-You are a proactive AI assistant. This is a scheduled heartbeat check.
-Review the following tasks and execute any necessary actions using available skills.
-If there is nothing that requires attention, respond ONLY with: HEARTBEAT_OK
+This is a scheduled heartbeat check. Execute only tasks that are explicitly listed below.
+Do NOT send messages to the user unless a task explicitly requires notifying them.
+Do NOT use the message tool unless absolutely necessary for a listed task.
+If there are no actionable tasks, respond ONLY with: HEARTBEAT_OK
 
 %s
 `, now, content)
@@ -256,16 +257,19 @@ func (hs *HeartbeatService) createDefaultHeartbeatTemplate() {
 	defaultContent := `# Heartbeat Check List
 
 This file contains tasks for the heartbeat service to check periodically.
+If no tasks are listed below the separator, respond with HEARTBEAT_OK immediately.
+Do NOT use the message tool unless a task explicitly requires notifying the user.
 
-## Examples
-
+<!-- Examples (these are commented out and NOT real tasks):
 - Check for unread messages
 - Review upcoming calendar events
-- Check device status (e.g., MaixCam)
+- Check device status
+-->
 
 ## Instructions
 
-- Execute ALL tasks listed below. Do NOT skip any task.
+- Execute ALL tasks listed below the separator. Do NOT skip any listed task.
+- If there are NO tasks listed, respond with HEARTBEAT_OK immediately.
 - For simple tasks (e.g., report current time), respond directly.
 - For complex tasks that may take time, use the spawn tool to create a subagent.
 - The spawn tool is async - subagent results will be sent to the user automatically.

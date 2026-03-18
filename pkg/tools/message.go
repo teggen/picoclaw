@@ -11,6 +11,7 @@ type SendCallback func(channel, chatID, content string) error
 type MessageTool struct {
 	sendCallback SendCallback
 	sentInRound  atomic.Bool // Tracks whether a message was sent in the current processing round
+	disabled     atomic.Bool // When true, Execute returns an error instead of sending
 }
 
 func NewMessageTool() *MessageTool {
@@ -57,11 +58,24 @@ func (t *MessageTool) HasSentInRound() bool {
 	return t.sentInRound.Load()
 }
 
+// SetDisabled enables or disables the message tool.
+// When disabled, Execute returns an error instructing the LLM to return text instead.
+func (t *MessageTool) SetDisabled(v bool) {
+	t.disabled.Store(v)
+}
+
 func (t *MessageTool) SetSendCallback(callback SendCallback) {
 	t.sendCallback = callback
 }
 
 func (t *MessageTool) Execute(ctx context.Context, args map[string]any) *ToolResult {
+	if t.disabled.Load() {
+		return &ToolResult{
+			ForLLM:  "Message tool is disabled during heartbeat processing. Return your response as text instead.",
+			IsError: true,
+		}
+	}
+
 	content, ok := args["content"].(string)
 	if !ok {
 		return &ToolResult{ForLLM: "content is required", IsError: true}

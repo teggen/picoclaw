@@ -855,7 +855,6 @@ func TestTargetReasoningChannelID_AllChannels(t *testing.T) {
 		"telegram":  "rid-telegram",
 		"feishu":    "rid-feishu",
 		"discord":   "rid-discord",
-		"maixcam":   "rid-maixcam",
 		"qq":        "rid-qq",
 		"dingtalk":  "rid-dingtalk",
 		"slack":     "rid-slack",
@@ -875,7 +874,6 @@ func TestTargetReasoningChannelID_AllChannels(t *testing.T) {
 		{channel: "telegram", wantID: "rid-telegram"},
 		{channel: "feishu", wantID: "rid-feishu"},
 		{channel: "discord", wantID: "rid-discord"},
-		{channel: "maixcam", wantID: "rid-maixcam"},
 		{channel: "qq", wantID: "rid-qq"},
 		{channel: "dingtalk", wantID: "rid-dingtalk"},
 		{channel: "slack", wantID: "rid-slack"},
@@ -1316,5 +1314,33 @@ func TestResolveMediaRefs_MixedImageAndFile(t *testing.T) {
 	expectedContent := "check these [file:" + pdfPath + "]"
 	if result[0].Content != expectedContent {
 		t.Fatalf("expected content %q, got %q", expectedContent, result[0].Content)
+	}
+}
+
+func TestStripToolCallExchanges(t *testing.T) {
+	messages := []providers.Message{
+		{Role: "system", Content: "You are helpful."},
+		{Role: "user", Content: "Hello"},
+		{Role: "assistant", Content: "Let me check.", ToolCalls: []providers.ToolCall{
+			{ID: "call_1", Name: "exec"},
+		}},
+		{Role: "tool", Content: "result", ToolCallID: "call_1"},
+		{Role: "assistant", Content: "Done."},
+		{Role: "user", Content: "Thanks"},
+	}
+
+	result := stripToolCallExchanges(messages)
+
+	if len(result) != 4 {
+		t.Fatalf("expected 4 messages, got %d", len(result))
+	}
+	expectedRoles := []string{"system", "user", "assistant", "user"}
+	for i, msg := range result {
+		if msg.Role != expectedRoles[i] {
+			t.Errorf("message %d: expected role %q, got %q", i, expectedRoles[i], msg.Role)
+		}
+	}
+	if result[2].Content != "Done." {
+		t.Errorf("expected kept assistant content %q, got %q", "Done.", result[2].Content)
 	}
 }

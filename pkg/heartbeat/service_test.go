@@ -3,6 +3,7 @@ package heartbeat
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -181,6 +182,79 @@ func TestLogPath(t *testing.T) {
 	expectedLogPath := filepath.Join(tmpDir, "heartbeat.log")
 	if _, err := os.Stat(expectedLogPath); os.IsNotExist(err) {
 		t.Errorf("Expected log file at %s, but it doesn't exist", expectedLogPath)
+	}
+}
+
+// TestDefaultTemplateHasNoUncommentedExamples verifies the default HEARTBEAT.md
+// template doesn't contain example tasks that the LLM could interpret as real tasks.
+func TestDefaultTemplateHasNoUncommentedExamples(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "heartbeat-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	hs := NewHeartbeatService(tmpDir, 30, true)
+
+	// Trigger default template creation
+	hs.buildPrompt()
+
+	data, err := os.ReadFile(filepath.Join(tmpDir, "HEARTBEAT.md"))
+	if err != nil {
+		t.Fatalf("Failed to read HEARTBEAT.md: %v", err)
+	}
+
+	content := string(data)
+
+	// Examples should be inside HTML comments, not as bare list items
+	// that an LLM could execute
+	lines := strings.Split(content, "\n")
+	inComment := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.Contains(trimmed, "<!--") {
+			inComment = true
+		}
+		if strings.Contains(trimmed, "-->") {
+			inComment = false
+			continue
+		}
+		if inComment {
+			continue
+		}
+		// Check for example-like tasks outside comments
+		for _, example := range []string{
+			"Check for unread messages",
+			"Review upcoming calendar events",
+			"Check device status",
+		} {
+			if strings.Contains(trimmed, example) {
+				t.Errorf("Found uncommented example task %q - LLM may execute it as a real task", example)
+			}
+		}
+	}
+}
+
+// TestBuildPromptContainsNoProactiveLanguage verifies the heartbeat prompt
+// doesn't use proactive language that could cause unsolicited actions.
+func TestBuildPromptContainsNoProactiveLanguage(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "heartbeat-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create a HEARTBEAT.md with a task
+	os.WriteFile(filepath.Join(tmpDir, "HEARTBEAT.md"), []byte("Check server status"), 0o644)
+
+	hs := NewHeartbeatService(tmpDir, 30, true)
+	prompt := hs.buildPrompt()
+
+	if strings.Contains(prompt, "proactive") {
+		t.Error("Prompt should not contain 'proactive' language")
+	}
+	if !strings.Contains(prompt, "explicitly listed") {
+		t.Error("Prompt should instruct to execute only explicitly listed tasks")
 	}
 }
 

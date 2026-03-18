@@ -189,6 +189,46 @@ func TestMessageTool_Execute_NotConfigured(t *testing.T) {
 	}
 }
 
+func TestMessageTool_Execute_DisabledReturnsError(t *testing.T) {
+	tool := NewMessageTool()
+	callCount := 0
+	tool.SetSendCallback(func(channel, chatID, content string) error {
+		callCount++
+		return nil
+	})
+	tool.SetDisabled(true)
+
+	ctx := WithToolContext(context.Background(), "test-channel", "test-chat-id")
+	args := map[string]any{
+		"content": "Hello, world!",
+	}
+
+	result := tool.Execute(ctx, args)
+
+	if !result.IsError {
+		t.Error("Expected IsError=true when disabled")
+	}
+	if result.ForLLM == "" {
+		t.Error("Expected non-empty ForLLM message")
+	}
+	if callCount != 0 {
+		t.Error("Send callback should not be called when disabled")
+	}
+
+	// Re-enable and verify it works again
+	tool.SetDisabled(false)
+	result = tool.Execute(ctx, args)
+	if result.IsError {
+		t.Errorf("Expected IsError=false after re-enabling, got error: %s", result.ForLLM)
+	}
+	if !result.Silent {
+		t.Error("Expected Silent=true for successful send after re-enabling")
+	}
+	if callCount != 1 {
+		t.Errorf("Expected send callback to be called once after re-enabling, got %d", callCount)
+	}
+}
+
 func TestMessageTool_Name(t *testing.T) {
 	tool := NewMessageTool()
 	if tool.Name() != "message" {

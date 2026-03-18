@@ -20,7 +20,6 @@ import (
 	_ "github.com/sipeed/picoclaw/pkg/channels/feishu"
 	_ "github.com/sipeed/picoclaw/pkg/channels/irc"
 	_ "github.com/sipeed/picoclaw/pkg/channels/line"
-	_ "github.com/sipeed/picoclaw/pkg/channels/maixcam"
 	_ "github.com/sipeed/picoclaw/pkg/channels/matrix"
 	_ "github.com/sipeed/picoclaw/pkg/channels/onebot"
 	_ "github.com/sipeed/picoclaw/pkg/channels/pico"
@@ -187,9 +186,9 @@ func setupAndStartServices(
 		if response == "HEARTBEAT_OK" {
 			return tools.SilentResult("Heartbeat OK")
 		}
-		// For heartbeat, always return silent - the subagent result will be
-		// sent to user via processSystemMessage when the async task completes
-		return tools.SilentResult(response)
+		// Let actionable responses flow through sendResponse() so the user
+		// receives them via the controlled heartbeat notification path
+		return &tools.ToolResult{ForUser: response}
 	})
 	if err := services.HeartbeatService.Start(); err != nil {
 		return nil, fmt.Errorf("error starting heartbeat service: %w", err)
@@ -438,7 +437,9 @@ func restartServices(
 		if response == "HEARTBEAT_OK" {
 			return tools.SilentResult("Heartbeat OK")
 		}
-		return tools.SilentResult(response)
+		// Let actionable responses flow through sendResponse() so the user
+		// receives them via the controlled heartbeat notification path
+		return &tools.ToolResult{ForUser: response}
 	})
 	if err := services.HeartbeatService.Start(); err != nil {
 		return fmt.Errorf("error restarting heartbeat service: %w", err)
