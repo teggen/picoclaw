@@ -24,6 +24,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/commands"
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/constants"
+	"github.com/sipeed/picoclaw/pkg/events"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/media"
 	"github.com/sipeed/picoclaw/pkg/providers"
@@ -36,19 +37,20 @@ import (
 )
 
 type AgentLoop struct {
-	bus            *bus.MessageBus
-	cfg            *config.Config
-	registry       *AgentRegistry
-	state          *state.Manager
-	running        atomic.Bool
-	summarizing    sync.Map
-	fallback       *providers.FallbackChain
-	channelManager *channels.Manager
-	mediaStore     media.MediaStore
-	transcriber    voice.Transcriber
-	cmdRegistry    *commands.Registry
-	mcp            mcpRuntime
-	mu             sync.RWMutex
+	bus              *bus.MessageBus
+	cfg              *config.Config
+	registry         *AgentRegistry
+	state            *state.Manager
+	running          atomic.Bool
+	summarizing      sync.Map
+	fallback         *providers.FallbackChain
+	channelManager   *channels.Manager
+	mediaStore       media.MediaStore
+	transcriber      voice.Transcriber
+	cmdRegistry      *commands.Registry
+	mcp              mcpRuntime
+	eventBroadcaster events.Broadcaster
+	mu               sync.RWMutex
 	// Track active requests for safe provider cleanup
 	activeRequests sync.WaitGroup
 }
@@ -109,6 +111,22 @@ func NewAgentLoop(
 	}
 
 	return al
+}
+
+// SetEventBroadcaster sets the event broadcaster for emitting lifecycle events.
+func (al *AgentLoop) SetEventBroadcaster(b events.Broadcaster) {
+	al.mu.Lock()
+	defer al.mu.Unlock()
+	al.eventBroadcaster = b
+}
+
+func (al *AgentLoop) emitEvent(eventType string, data map[string]any) {
+	al.mu.RLock()
+	b := al.eventBroadcaster
+	al.mu.RUnlock()
+	if b != nil {
+		b.Broadcast(eventType, data)
+	}
 }
 
 // registerSharedTools registers tools that are shared across all agents (web, message, spawn).
@@ -275,6 +293,11 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 
 				response, err := al.processMessage(ctx, msg)
 				if err != nil {
+					al.emitEvent(events.TurnError, map[string]any{
+						"session": msg.SessionKey,
+						"channel": msg.Channel,
+						"error":   err.Error(),
+					})
 					response = fmt.Sprintf("Error processing message: %v", err)
 				}
 
@@ -749,6 +772,23 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		return response, nil
 	}
 
+	// Detect new session (no prior history).
+	history := agent.Sessions.GetHistory(opts.SessionKey)
+	if len(history) == 0 {
+		al.emitEvent(events.SessionStarted, map[string]any{
+			"session": opts.SessionKey,
+			"channel": opts.Channel,
+			"agent":   agent.ID,
+		})
+	}
+
+	al.emitEvent(events.TurnStarted, map[string]any{
+		"session": opts.SessionKey,
+		"channel": opts.Channel,
+		"agent":   agent.ID,
+		"message": utils.Truncate(opts.UserMessage, 200),
+	})
+
 	return al.runAgentLoop(ctx, agent, opts)
 }
 
@@ -931,6 +971,13 @@ func (al *AgentLoop) runAgentLoop(
 			"iterations":   iteration,
 			"final_length": len(finalContent),
 		})
+
+	al.emitEvent(events.TurnCompleted, map[string]any{
+		"session":    opts.SessionKey,
+		"channel":    opts.Channel,
+		"agent":      agent.ID,
+		"iterations": iteration,
+	})
 
 	return finalContent, nil
 }
@@ -1341,6 +1388,12 @@ func (al *AgentLoop) runLLMIteration(
 					})
 				}
 
+				al.emitEvent(events.ToolCallStarted, map[string]any{
+					"session":   opts.SessionKey,
+					"tool":      tc.Name,
+					"arguments": tc.Arguments,
+				})
+				toolStart := time.Now()
 				toolResult := agent.Tools.ExecuteWithContext(
 					ctx,
 					tc.Name,
@@ -1349,6 +1402,13 @@ func (al *AgentLoop) runLLMIteration(
 					opts.ChatID,
 					asyncCallback,
 				)
+				al.emitEvent(events.ToolCallCompleted, map[string]any{
+					"session":  opts.SessionKey,
+					"tool":     tc.Name,
+					"duration": time.Since(toolStart).Seconds(),
+					"isError":  toolResult.Err != nil,
+					"result":   utils.Truncate(toolResult.ForLLM, 500),
+				})
 				agentResults[idx].result = toolResult
 			}(i, tc)
 		}
@@ -1481,6 +1541,10 @@ func (al *AgentLoop) maybeSummarize(agent *AgentInstance, sessionKey, channel, c
 				defer al.summarizing.Delete(summarizeKey)
 				logger.Debug("Memory threshold reached. Optimizing conversation history...")
 				al.summarizeSession(agent, sessionKey)
+				al.emitEvent(events.SessionSummarized, map[string]any{
+					"session": sessionKey,
+					"agent":   agent.ID,
+				})
 			}()
 		}
 	}
@@ -1952,6 +2016,10 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance, opts *processOpt
 			agent.Sessions.SetHistory(opts.SessionKey, make([]providers.Message, 0))
 			agent.Sessions.SetSummary(opts.SessionKey, "")
 			agent.Sessions.Save(opts.SessionKey)
+			al.emitEvent(events.SessionCleared, map[string]any{
+				"session": opts.SessionKey,
+				"channel": opts.Channel,
+			})
 			return nil
 		}
 

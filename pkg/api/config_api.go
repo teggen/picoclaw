@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/sipeed/picoclaw/pkg/events"
 	"github.com/sipeed/picoclaw/pkg/logger"
 )
 
@@ -44,7 +45,7 @@ func (h *Handler) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.InfoC("api", "Config replaced via PUT /api/v1/config")
-	h.eventHub.Broadcast("config.updated", nil)
+	h.eventHub.Broadcast(events.ConfigUpdated, nil)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -104,7 +105,7 @@ func (h *Handler) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.InfoC("api", "Config patched via PATCH /api/v1/config")
-	h.eventHub.Broadcast("config.updated", nil)
+	h.eventHub.Broadcast(events.ConfigUpdated, nil)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

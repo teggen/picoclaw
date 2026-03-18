@@ -3,6 +3,8 @@ Description=PicoClaw AI Assistant Gateway
 Documentation=https://github.com/sipeed/picoclaw
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -13,8 +15,6 @@ Environment=PICOCLAW_HOME=/var/lib/picoclaw
 ExecStart=/usr/local/bin/picoclaw gateway
 Restart=on-failure
 RestartSec=5
-StartLimitIntervalSec=300
-StartLimitBurst=5
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=picoclaw

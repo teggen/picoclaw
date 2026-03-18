@@ -19,13 +19,15 @@ type Handler struct {
 
 // NewHandler creates a new API handler.
 func NewHandler(agentLoop *agent.AgentLoop, chanMgr *channels.Manager, configPath string) *Handler {
-	return &Handler{
+	h := &Handler{
 		agentLoop:  agentLoop,
 		chanMgr:    chanMgr,
 		configPath: configPath,
 		eventHub:   NewEventHub(),
 		startTime:  time.Now(),
 	}
+	agentLoop.SetEventBroadcaster(h.eventHub)
+	return h
 }
 
 // RegisterRoutes registers all API handler routes on the given mux.

@@ -4,6 +4,11 @@ set -euo pipefail
 BINARY_SRC="${1:-./build/picoclaw}"
 INSTALL_BIN="/usr/local/bin/picoclaw"
 
+# Derive CLI binary path from the same build directory.
+BUILD_DIR="$(dirname "$BINARY_SRC")"
+CLI_SRC="$BUILD_DIR/picoclaw-cli"
+CLI_INSTALL_BIN="/usr/local/bin/picoclaw-cli"
+
 # --- Root check ---
 if [[ "$EUID" -ne 0 ]]; then
     echo "Error: This script must be run as root." >&2
@@ -35,6 +40,18 @@ cp "$BINARY_SRC" "$TMPBIN"
 chown root:root "$TMPBIN"
 chmod 0755 "$TMPBIN"
 mv "$TMPBIN" "$INSTALL_BIN"
+
+# --- Replace CLI binary if present ---
+if [[ -f "$CLI_SRC" && -x "$CLI_SRC" ]]; then
+    echo "Updating CLI binary at $CLI_INSTALL_BIN..."
+    TMPCLIIN="$(mktemp "${CLI_INSTALL_BIN}.XXXXXX")"
+    cp "$CLI_SRC" "$TMPCLIIN"
+    chown root:root "$TMPCLIIN"
+    chmod 0755 "$TMPCLIIN"
+    mv "$TMPCLIIN" "$CLI_INSTALL_BIN"
+else
+    echo "Note: CLI binary not found at '$CLI_SRC'; skipping CLI update."
+fi
 
 # --- Restart service if running ---
 if systemctl is-active --quiet picoclaw 2>/dev/null; then

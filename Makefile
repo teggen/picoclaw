@@ -111,6 +111,18 @@ build: generate
 	@echo "Build complete: $(BINARY_PATH)"
 	@ln -sf $(BINARY_NAME)-$(PLATFORM)-$(ARCH) $(BUILD_DIR)/$(BINARY_NAME)
 
+CLI_CLIENT_DIR=clients/cli
+CLI_CONFIG_PKG=github.com/sipeed/picoclaw/clients/cli/internal
+CLI_LDFLAGS=-ldflags "-X $(CLI_CONFIG_PKG).CLIVersion=$(VERSION) -X $(CLI_CONFIG_PKG).CLICommit=$(GIT_COMMIT) -s -w"
+
+## build-cli: Build the picoclaw-cli client binary
+build-cli:
+	@echo "Building picoclaw-cli for $(PLATFORM)/$(ARCH)..."
+	@mkdir -p $(BUILD_DIR)
+	@$(GO) build $(GOFLAGS) $(CLI_LDFLAGS) -o $(BUILD_DIR)/picoclaw-cli-$(PLATFORM)-$(ARCH) ./$(CLI_CLIENT_DIR)
+	@ln -sf picoclaw-cli-$(PLATFORM)-$(ARCH) $(BUILD_DIR)/picoclaw-cli
+	@echo "Build complete: $(BUILD_DIR)/picoclaw-cli"
+
 ## build-launcher: Build the picoclaw-launcher (web console) binary
 build-launcher:
 	@echo "Building picoclaw-launcher for $(PLATFORM)/$(ARCH)..."
@@ -249,6 +261,13 @@ update-deps:
 
 ## check: Run vet, fmt, and verify dependencies
 check: deps fmt vet test
+
+## build-local: Build picoclaw and picoclaw-cli for current platform
+build-local: build build-cli
+
+## update: Build picoclaw and picoclaw-cli, then install via scripts/update.sh
+update: build-local
+	sudo scripts/update.sh $(BINARY_PATH)
 
 ## run: Build and run picoclaw
 run: build
