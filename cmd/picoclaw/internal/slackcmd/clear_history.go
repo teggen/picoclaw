@@ -118,6 +118,8 @@ func clearHistory(
 			return found, deleted, errors, nil
 		}
 
+		fmt.Fprintf(w, "\rDeleting message %d/%d...", i+1, found)
+
 		_, _, deleteErr := api.DeleteMessage(channelID, ts)
 		if deleteErr != nil {
 			if rateLimitErr, ok := deleteErr.(*slack.RateLimitedError); ok {
