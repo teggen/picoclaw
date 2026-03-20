@@ -337,7 +337,6 @@ type DiscordConfig struct {
 	ReasoningChannelID string              `json:"reasoning_channel_id"    env:"PICOCLAW_CHANNELS_DISCORD_REASONING_CHANNEL_ID"`
 }
 
-
 type QQConfig struct {
 	Enabled            bool                `json:"enabled"                 env:"PICOCLAW_CHANNELS_QQ_ENABLED"`
 	AppID              string              `json:"app_id"                  env:"PICOCLAW_CHANNELS_QQ_APP_ID"`
@@ -748,30 +747,29 @@ type ReadFileToolConfig struct {
 }
 
 type ToolsConfig struct {
-	AllowReadPaths  []string           `json:"allow_read_paths"  env:"PICOCLAW_TOOLS_ALLOW_READ_PATHS"`
-	AllowWritePaths []string           `json:"allow_write_paths" env:"PICOCLAW_TOOLS_ALLOW_WRITE_PATHS"`
-	Web             WebToolsConfig     `json:"web"`
-	Cron            CronToolsConfig    `json:"cron"`
-	Exec            ExecConfig         `json:"exec"`
-	Skills          SkillsToolsConfig  `json:"skills"`
-	MediaCleanup    MediaCleanupConfig `json:"media_cleanup"`
-	MCP             MCPConfig          `json:"mcp"`
-	AppendFile      ToolConfig         `json:"append_file"                                              envPrefix:"PICOCLAW_TOOLS_APPEND_FILE_"`
-	EditFile        ToolConfig         `json:"edit_file"                                                envPrefix:"PICOCLAW_TOOLS_EDIT_FILE_"`
-	FindSkills      ToolConfig         `json:"find_skills"                                              envPrefix:"PICOCLAW_TOOLS_FIND_SKILLS_"`
-	I2C             ToolConfig         `json:"i2c"                                                      envPrefix:"PICOCLAW_TOOLS_I2C_"`
-	InstallSkill    ToolConfig         `json:"install_skill"                                            envPrefix:"PICOCLAW_TOOLS_INSTALL_SKILL_"`
-	ListDir         ToolConfig         `json:"list_dir"                                                 envPrefix:"PICOCLAW_TOOLS_LIST_DIR_"`
-	Message         ToolConfig         `json:"message"                                                  envPrefix:"PICOCLAW_TOOLS_MESSAGE_"`
-	ReadFile        ReadFileToolConfig `json:"read_file"                                                envPrefix:"PICOCLAW_TOOLS_READ_FILE_"`
-	SendFile        ToolConfig         `json:"send_file"                                                envPrefix:"PICOCLAW_TOOLS_SEND_FILE_"`
-	Spawn           ToolConfig         `json:"spawn"                                                    envPrefix:"PICOCLAW_TOOLS_SPAWN_"`
-	SPI             ToolConfig         `json:"spi"                                                      envPrefix:"PICOCLAW_TOOLS_SPI_"`
-	Subagent        ToolConfig         `json:"subagent"                                                 envPrefix:"PICOCLAW_TOOLS_SUBAGENT_"`
-	WebFetch        ToolConfig         `json:"web_fetch"                                                envPrefix:"PICOCLAW_TOOLS_WEB_FETCH_"`
-	WriteFile       ToolConfig         `json:"write_file"                                               envPrefix:"PICOCLAW_TOOLS_WRITE_FILE_"`
-	CodingAgent     CodingAgentConfig  `json:"coding_agent"`
-	ConfigView      ToolConfig         `json:"config_view"                                              envPrefix:"PICOCLAW_TOOLS_CONFIG_VIEW_"`
+	AllowReadPaths   []string           `json:"allow_read_paths"   env:"PICOCLAW_TOOLS_ALLOW_READ_PATHS"`
+	AllowWritePaths  []string           `json:"allow_write_paths"  env:"PICOCLAW_TOOLS_ALLOW_WRITE_PATHS"`
+	Web              WebToolsConfig     `json:"web"`
+	Cron             CronToolsConfig    `json:"cron"`
+	Exec             ExecConfig         `json:"exec"`
+	Skills           SkillsToolsConfig  `json:"skills"`
+	MediaCleanup     MediaCleanupConfig `json:"media_cleanup"`
+	MCP              MCPConfig          `json:"mcp"`
+	AppendFile       ToolConfig         `json:"append_file"                                               envPrefix:"PICOCLAW_TOOLS_APPEND_FILE_"`
+	EditFile         ToolConfig         `json:"edit_file"                                                 envPrefix:"PICOCLAW_TOOLS_EDIT_FILE_"`
+	FindSkills       ToolConfig         `json:"find_skills"                                               envPrefix:"PICOCLAW_TOOLS_FIND_SKILLS_"`
+	InstallSkill     ToolConfig         `json:"install_skill"                                             envPrefix:"PICOCLAW_TOOLS_INSTALL_SKILL_"`
+	ListDir          ToolConfig         `json:"list_dir"                                                  envPrefix:"PICOCLAW_TOOLS_LIST_DIR_"`
+	Message          ToolConfig         `json:"message"                                                   envPrefix:"PICOCLAW_TOOLS_MESSAGE_"`
+	ReadFile         ReadFileToolConfig `json:"read_file"                                                 envPrefix:"PICOCLAW_TOOLS_READ_FILE_"`
+	SendFile         ToolConfig         `json:"send_file"                                                 envPrefix:"PICOCLAW_TOOLS_SEND_FILE_"`
+	Spawn            ToolConfig         `json:"spawn"                                                     envPrefix:"PICOCLAW_TOOLS_SPAWN_"`
+	Subagent         ToolConfig         `json:"subagent"                                                  envPrefix:"PICOCLAW_TOOLS_SUBAGENT_"`
+	WebFetch         ToolConfig         `json:"web_fetch"                                                 envPrefix:"PICOCLAW_TOOLS_WEB_FETCH_"`
+	WebFetchMarkdown ToolConfig         `json:"web_fetch_markdown"                                        envPrefix:"PICOCLAW_TOOLS_WEB_FETCH_MARKDOWN_"`
+	WriteFile        ToolConfig         `json:"write_file"                                                envPrefix:"PICOCLAW_TOOLS_WRITE_FILE_"`
+	CodingAgent      CodingAgentConfig  `json:"coding_agent"`
+	ConfigView       ToolConfig         `json:"config_view"                                               envPrefix:"PICOCLAW_TOOLS_CONFIG_VIEW_"`
 }
 
 type SearchCacheConfig struct {
@@ -1051,8 +1049,6 @@ func (t *ToolsConfig) IsToolEnabled(name string) bool {
 		return t.EditFile.Enabled
 	case "find_skills":
 		return t.FindSkills.Enabled
-	case "i2c":
-		return t.I2C.Enabled
 	case "install_skill":
 		return t.InstallSkill.Enabled
 	case "list_dir":
@@ -1063,12 +1059,12 @@ func (t *ToolsConfig) IsToolEnabled(name string) bool {
 		return t.ReadFile.Enabled
 	case "spawn":
 		return t.Spawn.Enabled
-	case "spi":
-		return t.SPI.Enabled
 	case "subagent":
 		return t.Subagent.Enabled
 	case "web_fetch":
 		return t.WebFetch.Enabled
+	case "web_fetch_markdown":
+		return t.WebFetchMarkdown.Enabled
 	case "send_file":
 		return t.SendFile.Enabled
 	case "write_file":

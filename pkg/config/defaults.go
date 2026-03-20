@@ -487,9 +487,6 @@ func DefaultConfig() *Config {
 			FindSkills: ToolConfig{
 				Enabled: true,
 			},
-			I2C: ToolConfig{
-				Enabled: false, // Hardware tool - Linux only
-			},
 			InstallSkill: ToolConfig{
 				Enabled: true,
 			},
@@ -506,13 +503,13 @@ func DefaultConfig() *Config {
 			Spawn: ToolConfig{
 				Enabled: true,
 			},
-			SPI: ToolConfig{
-				Enabled: false, // Hardware tool - Linux only
-			},
 			Subagent: ToolConfig{
 				Enabled: true,
 			},
 			WebFetch: ToolConfig{
+				Enabled: true,
+			},
+			WebFetchMarkdown: ToolConfig{
 				Enabled: true,
 			},
 			WriteFile: ToolConfig{

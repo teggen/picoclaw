@@ -414,6 +414,198 @@ func TestWebFetchTool_extractText(t *testing.T) {
 	}
 }
 
+// TestWebTool_WebFetchMarkdown_Success verifies HTML is converted to markdown
+func TestWebTool_WebFetchMarkdown_Success(t *testing.T) {
+	withPrivateWebFetchHostsAllowed(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`<html><body>
+			<h1>Main Title</h1>
+			<p>A paragraph with a <a href="https://example.com">link</a>.</p>
+			<ul>
+				<li>Item one</li>
+				<li>Item two</li>
+			</ul>
+		</body></html>`))
+	}))
+	defer server.Close()
+
+	tool, err := NewWebFetchMarkdownTool(50000, testFetchLimit)
+	if err != nil {
+		t.Fatalf("Failed to create web fetch markdown tool: %v", err)
+	}
+
+	result := tool.Execute(context.Background(), map[string]any{"url": server.URL})
+
+	if result.IsError {
+		t.Fatalf("Expected success, got IsError=true: %s", result.ForLLM)
+	}
+
+	// Verify extractor is markdown
+	var resultMap map[string]any
+	if err := json.Unmarshal([]byte(result.ForLLM), &resultMap); err != nil {
+		t.Fatalf("Failed to unmarshal result: %v", err)
+	}
+	if resultMap["extractor"] != "markdown" {
+		t.Errorf("Expected extractor 'markdown', got %q", resultMap["extractor"])
+	}
+
+	text := resultMap["text"].(string)
+	// Should contain markdown heading
+	if !strings.Contains(text, "# Main Title") {
+		t.Errorf("Expected markdown heading '# Main Title' in output, got: %s", text)
+	}
+	// Should contain markdown link
+	if !strings.Contains(text, "[link](https://example.com)") {
+		t.Errorf("Expected markdown link in output, got: %s", text)
+	}
+	// Should contain list items
+	if !strings.Contains(text, "- Item one") && !strings.Contains(text, "* Item one") {
+		t.Errorf("Expected markdown list items in output, got: %s", text)
+	}
+}
+
+// TestWebTool_WebFetchMarkdown_JSON verifies JSON content is handled identically
+func TestWebTool_WebFetchMarkdown_JSON(t *testing.T) {
+	withPrivateWebFetchHostsAllowed(t)
+
+	testData := map[string]string{"key": "value"}
+	expectedJSON, _ := json.MarshalIndent(testData, "", "  ")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(expectedJSON)
+	}))
+	defer server.Close()
+
+	tool, err := NewWebFetchMarkdownTool(50000, testFetchLimit)
+	if err != nil {
+		t.Fatalf("Failed to create web fetch markdown tool: %v", err)
+	}
+
+	result := tool.Execute(context.Background(), map[string]any{"url": server.URL})
+
+	if result.IsError {
+		t.Fatalf("Expected success, got IsError=true: %s", result.ForLLM)
+	}
+
+	var resultMap map[string]any
+	if err := json.Unmarshal([]byte(result.ForLLM), &resultMap); err != nil {
+		t.Fatalf("Failed to unmarshal result: %v", err)
+	}
+	if resultMap["extractor"] != "json" {
+		t.Errorf("Expected extractor 'json', got %q", resultMap["extractor"])
+	}
+}
+
+// TestWebTool_WebFetchMarkdown_RelativeLinks verifies relative links are resolved to absolute URLs
+func TestWebTool_WebFetchMarkdown_RelativeLinks(t *testing.T) {
+	withPrivateWebFetchHostsAllowed(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`<html><body><a href="/about">About Us</a></body></html>`))
+	}))
+	defer server.Close()
+
+	tool, err := NewWebFetchMarkdownTool(50000, testFetchLimit)
+	if err != nil {
+		t.Fatalf("Failed to create web fetch markdown tool: %v", err)
+	}
+
+	result := tool.Execute(context.Background(), map[string]any{"url": server.URL})
+
+	if result.IsError {
+		t.Fatalf("Expected success, got IsError=true: %s", result.ForLLM)
+	}
+
+	var resultMap map[string]any
+	json.Unmarshal([]byte(result.ForLLM), &resultMap)
+	text := resultMap["text"].(string)
+
+	// Relative link should be resolved to absolute
+	if !strings.Contains(text, server.URL+"/about") {
+		t.Errorf("Expected relative link resolved to absolute URL containing %q, got: %s", server.URL+"/about", text)
+	}
+}
+
+// TestWebTool_WebFetchMarkdown_Truncation verifies large HTML is truncated
+func TestWebTool_WebFetchMarkdown_Truncation(t *testing.T) {
+	withPrivateWebFetchHostsAllowed(t)
+
+	// Generate HTML large enough to exceed maxChars after conversion
+	var htmlBuilder strings.Builder
+	htmlBuilder.WriteString("<html><body>")
+	for range 500 {
+		htmlBuilder.WriteString("<p>This is a paragraph of text that should contribute to a large output.</p>\n")
+	}
+	htmlBuilder.WriteString("</body></html>")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(htmlBuilder.String()))
+	}))
+	defer server.Close()
+
+	tool, err := NewWebFetchMarkdownTool(500, testFetchLimit) // Small maxChars
+	if err != nil {
+		t.Fatalf("Failed to create web fetch markdown tool: %v", err)
+	}
+
+	result := tool.Execute(context.Background(), map[string]any{"url": server.URL})
+
+	if result.IsError {
+		t.Fatalf("Expected success, got IsError=true: %s", result.ForLLM)
+	}
+
+	var resultMap map[string]any
+	json.Unmarshal([]byte(result.ForLLM), &resultMap)
+
+	if truncated, ok := resultMap["truncated"].(bool); !ok || !truncated {
+		t.Errorf("Expected 'truncated' to be true in result")
+	}
+	if text, ok := resultMap["text"].(string); ok {
+		if len(text) > 600 { // Allow some margin
+			t.Errorf("Expected content truncated to ~500 chars, got: %d", len(text))
+		}
+	}
+}
+
+// TestWebTool_WebFetchMarkdown_InvalidURL verifies error cases match web_fetch behavior
+func TestWebTool_WebFetchMarkdown_InvalidURL(t *testing.T) {
+	tool, err := NewWebFetchMarkdownTool(50000, testFetchLimit)
+	if err != nil {
+		t.Fatalf("Failed to create web fetch markdown tool: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{"missing url", map[string]any{}, "url is required"},
+		{"invalid scheme", map[string]any{"url": "ftp://example.com"}, "http/https"},
+		{"missing domain", map[string]any{"url": "https://"}, "domain"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tool.Execute(context.Background(), tt.args)
+			if !result.IsError {
+				t.Errorf("Expected error for %s", tt.name)
+			}
+			if !strings.Contains(result.ForLLM, tt.want) {
+				t.Errorf("Expected error containing %q, got: %s", tt.want, result.ForLLM)
+			}
+		})
+	}
+}
+
 func withPrivateWebFetchHostsAllowed(t *testing.T) {
 	t.Helper()
 	previous := allowPrivateWebFetchHosts.Load()

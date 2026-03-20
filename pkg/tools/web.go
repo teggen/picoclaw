@@ -15,6 +15,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/converter"
+
 	"github.com/sipeed/picoclaw/pkg/utils"
 )
 
@@ -828,7 +831,7 @@ func (t *WebFetchTool) Name() string {
 }
 
 func (t *WebFetchTool) Description() string {
-	return "Fetch a URL and extract readable content (HTML to text). Use this to get weather info, news, articles, or any web content."
+	return "Fetch a URL and extract readable content (HTML to plain text, loses structure). Prefer web_fetch_markdown when available — it preserves formatting and uses fewer tokens."
 }
 
 func (t *WebFetchTool) Parameters() map[string]any {
@@ -849,48 +852,43 @@ func (t *WebFetchTool) Parameters() map[string]any {
 	}
 }
 
-func (t *WebFetchTool) Execute(ctx context.Context, args map[string]any) *ToolResult {
-	urlStr, ok := args["url"].(string)
-	if !ok {
-		return ErrorResult("url is required")
-	}
+type fetchResult struct {
+	body        []byte
+	contentType string
+	statusCode  int
+	parsedURL   *url.URL
+}
 
+func (t *WebFetchTool) fetchURL(ctx context.Context, urlStr string) (*fetchResult, *ToolResult) {
 	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
-		return ErrorResult(fmt.Sprintf("invalid URL: %v", err))
+		return nil, ErrorResult(fmt.Sprintf("invalid URL: %v", err))
 	}
 
 	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-		return ErrorResult("only http/https URLs are allowed")
+		return nil, ErrorResult("only http/https URLs are allowed")
 	}
 
 	if parsedURL.Host == "" {
-		return ErrorResult("missing domain in URL")
+		return nil, ErrorResult("missing domain in URL")
 	}
 
 	// Lightweight pre-flight: block obvious localhost/literal-IP without DNS resolution.
 	// The real SSRF guard is newSafeDialContext at connect time.
 	hostname := parsedURL.Hostname()
 	if isObviousPrivateHost(hostname) {
-		return ErrorResult("fetching private or local network hosts is not allowed")
-	}
-
-	maxChars := t.maxChars
-	if mc, ok := args["maxChars"].(float64); ok {
-		if int(mc) > 100 {
-			maxChars = int(mc)
-		}
+		return nil, ErrorResult("fetching private or local network hosts is not allowed")
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
 	if err != nil {
-		return ErrorResult(fmt.Sprintf("failed to create request: %v", err))
+		return nil, ErrorResult(fmt.Sprintf("failed to create request: %v", err))
 	}
 
 	req.Header.Set("User-Agent", userAgent)
 	resp, err := t.client.Do(req)
 	if err != nil {
-		return ErrorResult(fmt.Sprintf("request failed: %v", err))
+		return nil, ErrorResult(fmt.Sprintf("request failed: %v", err))
 	}
 
 	resp.Body = http.MaxBytesReader(nil, resp.Body, t.fetchLimitBytes)
@@ -901,31 +899,65 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]any) *ToolRe
 	if err != nil {
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
-			return ErrorResult(fmt.Sprintf("failed to read response: size exceeded %d bytes limit", t.fetchLimitBytes))
+			return nil, ErrorResult(
+				fmt.Sprintf("failed to read response: size exceeded %d bytes limit", t.fetchLimitBytes),
+			)
 		}
-		return ErrorResult(fmt.Sprintf("failed to read response: %v", err))
+		return nil, ErrorResult(fmt.Sprintf("failed to read response: %v", err))
 	}
 
-	contentType := resp.Header.Get("Content-Type")
+	return &fetchResult{
+		body:        body,
+		contentType: resp.Header.Get("Content-Type"),
+		statusCode:  resp.StatusCode,
+		parsedURL:   parsedURL,
+	}, nil
+}
+
+// htmlConverter transforms raw HTML into extracted text, returning the result and an extractor label.
+type htmlConverter func(html string, fr *fetchResult) (text string, extractor string)
+
+// fetchAndConvert handles the shared fetch → detect content type → convert → truncate → format pipeline.
+// The htmlConv callback is only invoked for HTML content; JSON and raw are handled uniformly.
+func (t *WebFetchTool) fetchAndConvert(
+	ctx context.Context,
+	args map[string]any,
+	htmlConv htmlConverter,
+) *ToolResult {
+	urlStr, ok := args["url"].(string)
+	if !ok {
+		return ErrorResult("url is required")
+	}
+
+	maxChars := t.maxChars
+	if mc, ok := args["maxChars"].(float64); ok {
+		if int(mc) > 100 {
+			maxChars = int(mc)
+		}
+	}
+
+	fr, errResult := t.fetchURL(ctx, urlStr)
+	if errResult != nil {
+		return errResult
+	}
 
 	var text, extractor string
 
-	if strings.Contains(contentType, "application/json") {
+	if strings.Contains(fr.contentType, "application/json") {
 		var jsonData any
-		if err := json.Unmarshal(body, &jsonData); err == nil {
+		if err := json.Unmarshal(fr.body, &jsonData); err == nil {
 			formatted, _ := json.MarshalIndent(jsonData, "", "  ")
 			text = string(formatted)
 			extractor = "json"
 		} else {
-			text = string(body)
+			text = string(fr.body)
 			extractor = "raw"
 		}
-	} else if strings.Contains(contentType, "text/html") || len(body) > 0 &&
-		(strings.HasPrefix(string(body), "<!DOCTYPE") || strings.HasPrefix(strings.ToLower(string(body)), "<html")) {
-		text = t.extractText(string(body))
-		extractor = "text"
+	} else if strings.Contains(fr.contentType, "text/html") || (len(fr.body) > 0 &&
+		(strings.HasPrefix(string(fr.body), "<!DOCTYPE") || strings.HasPrefix(strings.ToLower(string(fr.body)), "<html"))) {
+		text, extractor = htmlConv(string(fr.body), fr)
 	} else {
-		text = string(body)
+		text = string(fr.body)
 		extractor = "raw"
 	}
 
@@ -936,7 +968,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]any) *ToolRe
 
 	result := map[string]any{
 		"url":       urlStr,
-		"status":    resp.StatusCode,
+		"status":    fr.statusCode,
 		"extractor": extractor,
 		"truncated": truncated,
 		"length":    len(text),
@@ -955,6 +987,12 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]any) *ToolRe
 			truncated,
 		),
 	}
+}
+
+func (t *WebFetchTool) Execute(ctx context.Context, args map[string]any) *ToolResult {
+	return t.fetchAndConvert(ctx, args, func(html string, _ *fetchResult) (string, string) {
+		return t.extractText(html), "text"
+	})
 }
 
 func (t *WebFetchTool) extractText(htmlContent string) string {
@@ -977,6 +1015,46 @@ func (t *WebFetchTool) extractText(htmlContent string) string {
 	}
 
 	return strings.Join(cleanLines, "\n")
+}
+
+// WebFetchMarkdownTool fetches a URL and converts HTML to markdown, preserving document structure.
+type WebFetchMarkdownTool struct {
+	*WebFetchTool
+}
+
+func NewWebFetchMarkdownTool(maxChars int, fetchLimitBytes int64) (*WebFetchMarkdownTool, error) {
+	return NewWebFetchMarkdownToolWithProxy(maxChars, "", fetchLimitBytes)
+}
+
+func NewWebFetchMarkdownToolWithProxy(
+	maxChars int,
+	proxy string,
+	fetchLimitBytes int64,
+) (*WebFetchMarkdownTool, error) {
+	base, err := NewWebFetchToolWithProxy(maxChars, proxy, fetchLimitBytes)
+	if err != nil {
+		return nil, err
+	}
+	return &WebFetchMarkdownTool{WebFetchTool: base}, nil
+}
+
+func (t *WebFetchMarkdownTool) Name() string {
+	return "web_fetch_markdown"
+}
+
+func (t *WebFetchMarkdownTool) Description() string {
+	return "Fetch a URL and convert HTML to well-structured markdown. Preferred over web_fetch for text content: produces significantly fewer tokens while preserving headings, links, lists, code blocks, and formatting."
+}
+
+func (t *WebFetchMarkdownTool) Execute(ctx context.Context, args map[string]any) *ToolResult {
+	return t.fetchAndConvert(ctx, args, func(html string, fr *fetchResult) (string, string) {
+		domain := fr.parsedURL.Scheme + "://" + fr.parsedURL.Host
+		md, err := htmltomarkdown.ConvertString(html, converter.WithDomain(domain))
+		if err != nil {
+			return t.extractText(html), "text"
+		}
+		return md, "markdown"
+	})
 }
 
 // newSafeDialContext re-resolves DNS at connect time to mitigate DNS rebinding (TOCTOU)

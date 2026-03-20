@@ -165,9 +165,9 @@ func (t *ConfigViewTool) tools() string {
 
 	toolNames := []string{
 		"web", "cron", "exec", "skills", "media_cleanup", "mcp",
-		"append_file", "edit_file", "find_skills", "i2c", "install_skill",
+		"append_file", "edit_file", "find_skills", "install_skill",
 		"list_dir", "message", "read_file", "send_file", "spawn",
-		"spi", "subagent", "web_fetch", "write_file", "coding_agent",
+		"subagent", "web_fetch", "web_fetch_markdown", "write_file", "coding_agent",
 		"config_view",
 	}
 
@@ -299,9 +299,9 @@ func (t *ConfigViewTool) countEnabledTools() int {
 	count := 0
 	toolNames := []string{
 		"web", "cron", "exec", "skills", "media_cleanup", "mcp",
-		"append_file", "edit_file", "find_skills", "i2c", "install_skill",
+		"append_file", "edit_file", "find_skills", "install_skill",
 		"list_dir", "message", "read_file", "send_file", "spawn",
-		"spi", "subagent", "web_fetch", "write_file", "coding_agent",
+		"subagent", "web_fetch", "web_fetch_markdown", "write_file", "coding_agent",
 		"config_view",
 	}
 	for _, name := range toolNames {

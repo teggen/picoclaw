@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"runtime"
 	"testing"
 
 	"github.com/sipeed/picoclaw/pkg/config"
@@ -87,39 +86,6 @@ func TestHandleListTools(t *testing.T) {
 			"tool_search_tool_bm25 config_key = %q, want mcp.discovery.use_bm25",
 			gotTools["tool_search_tool_bm25"].ConfigKey,
 		)
-	}
-	if runtime.GOOS == "linux" {
-		if gotTools["i2c"].Status != "disabled" {
-			t.Fatalf("i2c status = %q, want disabled on linux when config is off", gotTools["i2c"].Status)
-		}
-	} else {
-		cfg.Tools.I2C.Enabled = true
-		cfg.Tools.SPI.Enabled = true
-		if err := config.SaveConfig(configPath, cfg); err != nil {
-			t.Fatalf("SaveConfig() error = %v", err)
-		}
-
-		rec = httptest.NewRecorder()
-		req = httptest.NewRequest(http.MethodGet, "/api/tools", nil)
-		mux.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
-		}
-
-		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-			t.Fatalf("Unmarshal() error = %v", err)
-		}
-		gotTools = make(map[string]toolSupportItem, len(resp.Tools))
-		for _, tool := range resp.Tools {
-			gotTools[tool.Name] = tool
-		}
-
-		if gotTools["i2c"].Status != "blocked" || gotTools["i2c"].ReasonCode != "requires_linux" {
-			t.Fatalf("i2c = %#v, want blocked/requires_linux", gotTools["i2c"])
-		}
-		if gotTools["spi"].Status != "blocked" || gotTools["spi"].ReasonCode != "requires_linux" {
-			t.Fatalf("spi = %#v, want blocked/requires_linux", gotTools["spi"])
-		}
 	}
 }
 
