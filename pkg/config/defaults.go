@@ -397,9 +397,10 @@ func DefaultConfig() *Config {
 			},
 		},
 		Gateway: GatewayConfig{
-			Host:      "127.0.0.1",
-			Port:      18790,
-			HotReload: false,
+			Host:           "127.0.0.1",
+			Port:           18790,
+			HotReload:      false,
+			MetricsEnabled: true,
 		},
 		Tools: ToolsConfig{
 			MediaCleanup: MediaCleanupConfig{
@@ -547,6 +548,9 @@ func DefaultConfig() *Config {
 				SessionContinuity: true,
 			},
 			ConfigView: ToolConfig{
+				Enabled: true,
+			},
+			Metrics: ToolConfig{
 				Enabled: true,
 			},
 		},

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sipeed/picoclaw/pkg/logger"
+	"github.com/sipeed/picoclaw/pkg/metrics"
 	"github.com/sipeed/picoclaw/pkg/providers"
 )
 
@@ -252,6 +253,10 @@ func (r *ToolRegistry) ExecuteWithContext(
 	}
 
 	duration := time.Since(start)
+
+	if metrics.DefaultCollector != nil {
+		metrics.DefaultCollector.RecordToolCall(name, duration, result.IsError)
+	}
 
 	// Log based on result type
 	if result.IsError {

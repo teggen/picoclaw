@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -37,6 +38,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/heartbeat"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/media"
+	"github.com/sipeed/picoclaw/pkg/metrics"
 	"github.com/sipeed/picoclaw/pkg/providers"
 	"github.com/sipeed/picoclaw/pkg/state"
 	"github.com/sipeed/picoclaw/pkg/tools"
@@ -170,7 +172,16 @@ func Run(debug bool, configPath string, allowEmptyStartup bool) error {
 				logger.Warn("Config reload skipped: another reload is in progress")
 				continue
 			}
-			err := executeReload(ctx, agentLoop, newCfg, &provider, runningServices, msgBus, allowEmptyStartup, configPath)
+			err := executeReload(
+				ctx,
+				agentLoop,
+				newCfg,
+				&provider,
+				runningServices,
+				msgBus,
+				allowEmptyStartup,
+				configPath,
+			)
 			if err != nil {
 				logger.Errorf("Config reload failed: %v", err)
 			}
@@ -187,7 +198,16 @@ func Run(debug bool, configPath string, allowEmptyStartup bool) error {
 				runningServices.reloading.Store(false)
 				continue
 			}
-			err = executeReload(ctx, agentLoop, newCfg, &provider, runningServices, msgBus, allowEmptyStartup, configPath)
+			err = executeReload(
+				ctx,
+				agentLoop,
+				newCfg,
+				&provider,
+				runningServices,
+				msgBus,
+				allowEmptyStartup,
+				configPath,
+			)
 			if err != nil {
 				logger.Errorf("Manual reload failed: %v", err)
 			} else {
@@ -298,13 +318,31 @@ func setupAndStartServices(
 		fmt.Println("⚠ Warning: No channels enabled")
 	}
 
+	// Setup metrics collector
+	if cfg.Gateway.MetricsEnabled {
+		metricsCollector := metrics.NewCollector()
+		metrics.DefaultCollector = metricsCollector
+
+		if cfg.Tools.IsToolEnabled("metrics") {
+			agentLoop.RegisterTool(tools.NewMetricsTool(metricsCollector))
+		}
+
+		fmt.Println("✓ Metrics collector enabled")
+	}
+
 	// Create API handler for state/config/docs endpoints
 	apiHandler := picoapi.NewHandler(agentLoop, runningServices.ChannelManager, configPath)
 
 	// Setup shared HTTP server with health endpoints, webhook handlers, and API routes
 	addr := fmt.Sprintf("%s:%d", cfg.Gateway.Host, cfg.Gateway.Port)
 	runningServices.HealthServer = health.NewServer(cfg.Gateway.Host, cfg.Gateway.Port)
-	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer, apiHandler.RegisterRoutes)
+
+	extras := []func(*http.ServeMux){apiHandler.RegisterRoutes}
+	if cfg.Gateway.MetricsEnabled && metrics.DefaultCollector != nil {
+		metricsHandler := metrics.NewHandler(metrics.DefaultCollector)
+		extras = append(extras, metricsHandler.RegisterRoutes)
+	}
+	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer, extras...)
 
 	if err = runningServices.ChannelManager.StartAll(context.Background()); err != nil {
 		return nil, fmt.Errorf("error starting channels: %w", err)

@@ -682,9 +682,10 @@ func (c *ModelConfig) Validate() error {
 }
 
 type GatewayConfig struct {
-	Host      string `json:"host"       env:"PICOCLAW_GATEWAY_HOST"`
-	Port      int    `json:"port"       env:"PICOCLAW_GATEWAY_PORT"`
-	HotReload bool   `json:"hot_reload" env:"PICOCLAW_GATEWAY_HOT_RELOAD"`
+	Host           string `json:"host"            env:"PICOCLAW_GATEWAY_HOST"`
+	Port           int    `json:"port"            env:"PICOCLAW_GATEWAY_PORT"`
+	HotReload      bool   `json:"hot_reload"      env:"PICOCLAW_GATEWAY_HOT_RELOAD"`
+	MetricsEnabled bool   `json:"metrics_enabled" env:"PICOCLAW_GATEWAY_METRICS_ENABLED"`
 }
 
 type ToolDiscoveryConfig struct {
@@ -838,6 +839,7 @@ type ToolsConfig struct {
 	WriteFile        ToolConfig         `json:"write_file"                                                envPrefix:"PICOCLAW_TOOLS_WRITE_FILE_"`
 	CodingAgent      CodingAgentConfig  `json:"coding_agent"`
 	ConfigView       ToolConfig         `json:"config_view"                                               envPrefix:"PICOCLAW_TOOLS_CONFIG_VIEW_"`
+	Metrics          ToolConfig         `json:"metrics"                                                   envPrefix:"PICOCLAW_TOOLS_METRICS_"`
 }
 
 type SearchCacheConfig struct {
@@ -1321,6 +1323,8 @@ func (t *ToolsConfig) IsToolEnabled(name string) bool {
 		return t.CodingAgent.Enabled
 	case "config_view":
 		return t.ConfigView.Enabled
+	case "metrics":
+		return t.Metrics.Enabled
 	default:
 		return true
 	}

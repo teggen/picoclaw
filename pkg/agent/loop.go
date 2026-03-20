@@ -27,6 +27,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/events"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/media"
+	"github.com/sipeed/picoclaw/pkg/metrics"
 	"github.com/sipeed/picoclaw/pkg/providers"
 	"github.com/sipeed/picoclaw/pkg/routing"
 	"github.com/sipeed/picoclaw/pkg/skills"
@@ -315,6 +316,9 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 						"channel": msg.Channel,
 						"error":   err.Error(),
 					})
+					if metrics.DefaultCollector != nil {
+						metrics.DefaultCollector.RecordTurnError()
+					}
 					response = fmt.Sprintf("Error processing message: %v", err)
 				}
 
@@ -729,6 +733,10 @@ func (al *AgentLoop) ProcessHeartbeat(
 }
 
 func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage) (string, error) {
+	if metrics.DefaultCollector != nil {
+		metrics.DefaultCollector.RecordInboundMessage(msg.Channel)
+	}
+
 	// Add message preview to log (show full content for error messages)
 	var logContent string
 	if strings.Contains(msg.Content, "Error:") || strings.Contains(msg.Content, "error") {
@@ -814,6 +822,9 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 			"channel": opts.Channel,
 			"agent":   agent.ID,
 		})
+		if metrics.DefaultCollector != nil {
+			metrics.DefaultCollector.SessionStarted()
+		}
 	}
 
 	al.emitEvent(events.TurnStarted, map[string]any{
@@ -998,6 +1009,9 @@ func (al *AgentLoop) runAgentLoop(
 			ChatID:  opts.ChatID,
 			Content: finalContent,
 		})
+		if metrics.DefaultCollector != nil {
+			metrics.DefaultCollector.RecordOutboundMessage(opts.Channel)
+		}
 	}
 
 	// 8. Log response
@@ -1016,6 +1030,9 @@ func (al *AgentLoop) runAgentLoop(
 		"agent":      agent.ID,
 		"iterations": iteration,
 	})
+	if metrics.DefaultCollector != nil {
+		metrics.DefaultCollector.RecordTurnCompleted()
+	}
 
 	return finalContent, nil
 }
@@ -1228,6 +1245,7 @@ func (al *AgentLoop) runLLMIteration(
 		}
 
 		// Retry loop for context/token errors
+		llmStart := time.Now()
 		maxRetries := 2
 		for retry := 0; retry <= maxRetries; retry++ {
 			response, err = callLLM()
@@ -1308,6 +1326,16 @@ func (al *AgentLoop) runLLMIteration(
 				continue
 			}
 			break
+		}
+
+		llmDuration := time.Since(llmStart)
+		if metrics.DefaultCollector != nil {
+			promptTokens, completionTokens := 0, 0
+			if err == nil && response != nil && response.Usage != nil {
+				promptTokens = response.Usage.PromptTokens
+				completionTokens = response.Usage.CompletionTokens
+			}
+			metrics.DefaultCollector.RecordLLMCall(activeModel, llmDuration, err != nil, promptTokens, completionTokens)
 		}
 
 		if err != nil {
@@ -2185,6 +2213,9 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance, opts *processOpt
 				"session": opts.SessionKey,
 				"channel": opts.Channel,
 			})
+			if metrics.DefaultCollector != nil {
+				metrics.DefaultCollector.SessionCleared()
+			}
 			return nil
 		}
 
