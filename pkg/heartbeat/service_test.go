@@ -185,9 +185,10 @@ func TestLogPath(t *testing.T) {
 	}
 }
 
-// TestDefaultTemplateHasNoUncommentedExamples verifies the default HEARTBEAT.md
-// template doesn't contain example tasks that the LLM could interpret as real tasks.
-func TestDefaultTemplateHasNoUncommentedExamples(t *testing.T) {
+// TestDefaultTemplateIsMinimal verifies the default HEARTBEAT.md
+// template is minimal and doesn't contain example tasks or HTML comments
+// that the LLM could interpret as real tasks.
+func TestDefaultTemplateIsMinimal(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "heartbeat-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -206,32 +207,31 @@ func TestDefaultTemplateHasNoUncommentedExamples(t *testing.T) {
 
 	content := string(data)
 
-	// Examples should be inside HTML comments, not as bare list items
-	// that an LLM could execute
-	lines := strings.Split(content, "\n")
-	inComment := false
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.Contains(trimmed, "<!--") {
-			inComment = true
+	// Should not contain HTML comments
+	if strings.Contains(content, "<!--") {
+		t.Error("Default template should not contain HTML comments")
+	}
+
+	// Should not contain example tasks
+	for _, example := range []string{
+		"Check for unread messages",
+		"Review upcoming calendar events",
+		"Check device status",
+		"MaixCAM",
+	} {
+		if strings.Contains(content, example) {
+			t.Errorf("Default template should not contain %q", example)
 		}
-		if strings.Contains(trimmed, "-->") {
-			inComment = false
-			continue
-		}
-		if inComment {
-			continue
-		}
-		// Check for example-like tasks outside comments
-		for _, example := range []string{
-			"Check for unread messages",
-			"Review upcoming calendar events",
-			"Check device status",
-		} {
-			if strings.Contains(trimmed, example) {
-				t.Errorf("Found uncommented example task %q - LLM may execute it as a real task", example)
-			}
-		}
+	}
+
+	// Should not contain spawn instructions
+	if strings.Contains(content, "spawn") {
+		t.Error("Default template should not contain spawn tool instructions")
+	}
+
+	// Should contain separator
+	if !strings.Contains(content, "---") {
+		t.Error("Default template should contain a --- separator")
 	}
 }
 
@@ -244,17 +244,79 @@ func TestBuildPromptContainsNoProactiveLanguage(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Create a HEARTBEAT.md with a task
-	os.WriteFile(filepath.Join(tmpDir, "HEARTBEAT.md"), []byte("Check server status"), 0o644)
+	// Create a HEARTBEAT.md with actual tasks below separator
+	content := "# Tasks\n\n---\nCheck server status\n"
+	os.WriteFile(filepath.Join(tmpDir, "HEARTBEAT.md"), []byte(content), 0o644)
 
 	hs := NewHeartbeatService(tmpDir, 30, true)
 	prompt := hs.buildPrompt()
 
+	if prompt == "" {
+		t.Fatal("Expected non-empty prompt for file with tasks")
+	}
 	if strings.Contains(prompt, "proactive") {
 		t.Error("Prompt should not contain 'proactive' language")
 	}
 	if !strings.Contains(prompt, "explicitly listed") {
 		t.Error("Prompt should instruct to execute only explicitly listed tasks")
+	}
+}
+
+// TestBuildPromptEmptyTaskSection verifies that buildPrompt returns ""
+// when HEARTBEAT.md exists but has no tasks below the separator.
+func TestBuildPromptEmptyTaskSection(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string // "" means empty prompt expected, "non-empty" means prompt expected
+	}{
+		{
+			name:    "separator with no tasks",
+			content: "# Heartbeat Tasks\n\n---\n",
+			want:    "",
+		},
+		{
+			name:    "separator with only whitespace after",
+			content: "# Heartbeat Tasks\n\n---\n\n  \n\n",
+			want:    "",
+		},
+		{
+			name:    "default template content",
+			content: "# Heartbeat Tasks\n\nAdd tasks below the separator line. If empty, the agent responds with HEARTBEAT_OK.\n\n---\n",
+			want:    "",
+		},
+		{
+			name:    "separator with actual task",
+			content: "# Tasks\n\n---\nCheck server status\n",
+			want:    "non-empty",
+		},
+		{
+			name:    "no separator at all",
+			content: "Check server status",
+			want:    "non-empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir, err := os.MkdirTemp("", "heartbeat-test-*")
+			if err != nil {
+				t.Fatalf("Failed to create temp dir: %v", err)
+			}
+			defer os.RemoveAll(tmpDir)
+
+			os.WriteFile(filepath.Join(tmpDir, "HEARTBEAT.md"), []byte(tt.content), 0o644)
+
+			hs := NewHeartbeatService(tmpDir, 30, true)
+			prompt := hs.buildPrompt()
+
+			if tt.want == "" && prompt != "" {
+				t.Errorf("Expected empty prompt, got: %s", prompt)
+			}
+			if tt.want == "non-empty" && prompt == "" {
+				t.Error("Expected non-empty prompt, got empty")
+			}
+		})
 	}
 }
 

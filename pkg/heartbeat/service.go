@@ -236,6 +236,17 @@ func (hs *HeartbeatService) buildPrompt() string {
 		return ""
 	}
 
+	// Check if there are actual tasks below the separator
+	if idx := strings.Index(content, "---"); idx >= 0 {
+		taskSection := strings.TrimSpace(content[idx+3:])
+		// Strip the instruction line if present
+		taskSection = strings.TrimPrefix(taskSection, "Add your heartbeat tasks below this line:")
+		taskSection = strings.TrimSpace(taskSection)
+		if taskSection == "" {
+			return ""
+		}
+	}
+
 	now := time.Now().Format("2006-01-02 15:04:05")
 	return fmt.Sprintf(`# Heartbeat Check
 
@@ -254,31 +265,11 @@ If there are no actionable tasks, respond ONLY with: HEARTBEAT_OK
 func (hs *HeartbeatService) createDefaultHeartbeatTemplate() {
 	heartbeatPath := filepath.Join(hs.workspace, "HEARTBEAT.md")
 
-	defaultContent := `# Heartbeat Check List
+	defaultContent := `# Heartbeat Tasks
 
-This file contains tasks for the heartbeat service to check periodically.
-If no tasks are listed below the separator, respond with HEARTBEAT_OK immediately.
-Do NOT use the message tool unless a task explicitly requires notifying the user.
-
-<!-- Examples (these are commented out and NOT real tasks):
-- Check for unread messages
-- Review upcoming calendar events
-- Check device status
--->
-
-## Instructions
-
-- Execute ALL tasks listed below the separator. Do NOT skip any listed task.
-- If there are NO tasks listed, respond with HEARTBEAT_OK immediately.
-- For simple tasks (e.g., report current time), respond directly.
-- For complex tasks that may take time, use the spawn tool to create a subagent.
-- The spawn tool is async - subagent results will be sent to the user automatically.
-- After spawning a subagent, CONTINUE to process remaining tasks.
-- Only respond with HEARTBEAT_OK when ALL tasks are done AND nothing needs attention.
+Add tasks below the separator line. If empty, the agent responds with HEARTBEAT_OK.
 
 ---
-
-Add your heartbeat tasks below this line:
 `
 
 	if err := fileutil.WriteFileAtomic(heartbeatPath, []byte(defaultContent), 0o644); err != nil {
