@@ -15,5 +15,6 @@ func BuiltinDefinitions() []Definition {
 		clearCommand(),
 		contextCommand(),
 		compactCommand(),
+		reloadCommand(),
 	}
 }

@@ -101,11 +101,15 @@ func newTestHarness(t *testing.T, response string) *testHarness {
 	// Start a goroutine that dispatches outbound messages from bus to channel.
 	go func() {
 		for {
-			msg, ok := msgBus.SubscribeOutbound(ctx)
-			if !ok {
+			select {
+			case msg, ok := <-msgBus.OutboundChan():
+				if !ok {
+					return
+				}
+				ch.Send(ctx, msg)
+			case <-ctx.Done():
 				return
 			}
-			ch.Send(ctx, msg)
 		}
 	}()
 

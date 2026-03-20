@@ -29,4 +29,5 @@ type Runtime struct {
 	ClearHistory       func() error
 	GetContextInfo     func() (*ContextInfo, error)
 	CompactHistory     func(ctx context.Context) (*ContextInfo, error)
+	ReloadConfig       func() error
 }

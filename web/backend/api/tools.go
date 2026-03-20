@@ -124,6 +124,12 @@ var toolCatalog = []toolCatalogEntry{
 		ConfigKey:   "spawn",
 	},
 	{
+		Name:        "spawn_status",
+		Description: "Query the status of spawned subagents.",
+		Category:    "agents",
+		ConfigKey:   "spawn_status",
+	},
+	{
 		Name:        "tool_search_tool_regex",
 		Description: "Discover hidden MCP tools by regex search when tool discovery is enabled.",
 		Category:    "discovery",
@@ -198,7 +204,7 @@ func buildToolSupport(cfg *config.Config) []toolSupportItem {
 					reasonCode = "requires_skills"
 				}
 			}
-		case "spawn":
+		case "spawn", "spawn_status":
 			if cfg.Tools.IsToolEnabled(entry.ConfigKey) {
 				if cfg.Tools.IsToolEnabled("subagent") {
 					status = "enabled"
@@ -281,6 +287,12 @@ func applyToolState(cfg *config.Config, toolName string, enabled bool) error {
 	case "spawn":
 		cfg.Tools.Spawn.Enabled = enabled
 		if enabled {
+			cfg.Tools.Subagent.Enabled = true
+		}
+	case "spawn_status":
+		cfg.Tools.SpawnStatus.Enabled = enabled
+		if enabled {
+			cfg.Tools.Spawn.Enabled = true
 			cfg.Tools.Subagent.Enabled = true
 		}
 	case "tool_search_tool_regex":

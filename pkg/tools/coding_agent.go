@@ -147,7 +147,7 @@ func (t *CodingAgentTool) Execute(ctx context.Context, args map[string]any) *Too
 
 	workDir := t.workspace
 	if wd, ok := args["working_dir"].(string); ok && strings.TrimSpace(wd) != "" {
-		resolved, err := validatePath(wd, t.workspace, true)
+		resolved, err := validatePathWithAllowPaths(wd, t.workspace, true, nil)
 		if err != nil {
 			return ErrorResult(fmt.Sprintf("invalid working_dir: %v", err))
 		}

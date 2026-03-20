@@ -51,22 +51,25 @@ type AgentLoop struct {
 	mcp              mcpRuntime
 	eventBroadcaster events.Broadcaster
 	mu               sync.RWMutex
+	reloadFunc       func() error
 	// Track active requests for safe provider cleanup
 	activeRequests sync.WaitGroup
 }
 
 // processOptions configures how a message is processed
 type processOptions struct {
-	SessionKey      string                      // Session identifier for history/context
-	Channel         string                      // Target channel for tool execution
-	ChatID          string                      // Target chat ID for tool execution
-	UserMessage     string                      // User message content (may include prefix)
-	Media           []string                    // media:// refs from inbound message
-	DefaultResponse string                      // Response when LLM returns empty
-	EnableSummary   bool                        // Whether to trigger summarization
-	SendResponse    bool                        // Whether to send response via bus
-	NoHistory       bool                        // If true, don't load session history (for heartbeat)
-	StreamCallback  func(providers.StreamEvent) // Optional callback for streaming deltas
+	SessionKey        string                      // Session identifier for history/context
+	Channel           string                      // Target channel for tool execution
+	ChatID            string                      // Target chat ID for tool execution
+	SenderID          string                      // Current sender ID for dynamic context
+	SenderDisplayName string                      // Current sender display name for dynamic context
+	UserMessage       string                      // User message content (may include prefix)
+	Media             []string                    // media:// refs from inbound message
+	DefaultResponse   string                      // Response when LLM returns empty
+	EnableSummary     bool                        // Whether to trigger summarization
+	SendResponse      bool                        // Whether to send response via bus
+	NoHistory         bool                        // If true, don't load session history (for heartbeat)
+	StreamCallback    func(providers.StreamEvent) // Optional callback for streaming deltas
 }
 
 const (
@@ -136,6 +139,8 @@ func registerSharedTools(
 	registry *AgentRegistry,
 	provider providers.LLMProvider,
 ) {
+	allowReadPaths := buildAllowReadPatterns(cfg)
+
 	for _, agentID := range registry.ListAgentIDs() {
 		agent, ok := registry.GetAgent(agentID)
 		if !ok {
@@ -176,7 +181,12 @@ func registerSharedTools(
 			}
 		}
 		if cfg.Tools.IsToolEnabled("web_fetch") {
-			fetchTool, err := tools.NewWebFetchToolWithProxy(50000, cfg.Tools.Web.Proxy, cfg.Tools.Web.FetchLimitBytes)
+			fetchTool, err := tools.NewWebFetchToolWithProxy(
+				50000,
+				cfg.Tools.Web.Proxy,
+				cfg.Tools.Web.Format,
+				cfg.Tools.Web.FetchLimitBytes,
+				cfg.Tools.Web.PrivateHostWhitelist)
 			if err != nil {
 				logger.ErrorCF("agent", "Failed to create web fetch tool", map[string]any{"error": err.Error()})
 			} else {
@@ -206,6 +216,7 @@ func registerSharedTools(
 				cfg.Agents.Defaults.RestrictToWorkspace,
 				cfg.Agents.Defaults.GetMaxMediaSize(),
 				nil,
+				allowReadPaths,
 			)
 			agent.Tools.Register(sendFileTool)
 		}
@@ -233,20 +244,31 @@ func registerSharedTools(
 			}
 		}
 
-		// Spawn tool with allowlist checker
-		if cfg.Tools.IsToolEnabled("spawn") {
-			if cfg.Tools.IsToolEnabled("subagent") {
-				subagentManager := tools.NewSubagentManager(provider, agent.Model, agent.Workspace)
-				subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
+		// Spawn and spawn_status tools share a SubagentManager.
+		// Construct it when either tool is enabled (both require subagent).
+		spawnEnabled := cfg.Tools.IsToolEnabled("spawn")
+		spawnStatusEnabled := cfg.Tools.IsToolEnabled("spawn_status")
+		if (spawnEnabled || spawnStatusEnabled) && cfg.Tools.IsToolEnabled("subagent") {
+			subagentManager := tools.NewSubagentManager(provider, agent.Model, agent.Workspace)
+			subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
+			// Clone the parent's tool registry so subagents can use all
+			// tools registered so far (file, web, etc.) but NOT spawn/
+			// spawn_status which are added below — preventing recursive
+			// subagent spawning.
+			subagentManager.SetTools(agent.Tools.Clone())
+			if spawnEnabled {
 				spawnTool := tools.NewSpawnTool(subagentManager)
 				currentAgentID := agentID
 				spawnTool.SetAllowlistChecker(func(targetAgentID string) bool {
 					return registry.CanSpawnSubagent(currentAgentID, targetAgentID)
 				})
 				agent.Tools.Register(spawnTool)
-			} else {
-				logger.WarnCF("agent", "spawn tool requires subagent to be enabled", nil)
 			}
+			if spawnStatusEnabled {
+				agent.Tools.Register(tools.NewSpawnStatusTool(subagentManager))
+			}
+		} else if (spawnEnabled || spawnStatusEnabled) && !cfg.Tools.IsToolEnabled("subagent") {
+			logger.WarnCF("agent", "spawn/spawn_status tools require subagent to be enabled", nil)
 		}
 	}
 }
@@ -262,14 +284,17 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
-		default:
-			msg, ok := al.bus.ConsumeInbound(ctx)
+		case msg, ok := <-al.bus.InboundChan():
 			if !ok {
-				continue
+				return nil
 			}
-
 			// Process message
 			func() {
+				defer func() {
+					if al.channelManager != nil {
+						al.channelManager.InvokeTypingStop(msg.Channel, msg.ChatID)
+					}
+				}()
 				// TODO: Re-enable media cleanup after inbound media is properly consumed by the agent.
 				// Currently disabled because files are deleted before the LLM can access their content.
 				// defer func() {
@@ -306,7 +331,6 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 							}
 						}
 					}
-
 					if !alreadySent {
 						al.bus.PublishOutbound(ctx, bus.OutboundMessage{
 							Channel: msg.Channel,
@@ -328,6 +352,8 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 					}
 				}
 			}()
+		default:
+			time.Sleep(time.Microsecond * 200)
 		}
 	}
 
@@ -493,6 +519,11 @@ func (al *AgentLoop) SetMediaStore(s media.MediaStore) {
 // SetTranscriber injects a voice transcriber for agent-level audio transcription.
 func (al *AgentLoop) SetTranscriber(t voice.Transcriber) {
 	al.transcriber = t
+}
+
+// SetReloadFunc sets the callback function for triggering config reload.
+func (al *AgentLoop) SetReloadFunc(fn func() error) {
+	al.reloadFunc = fn
 }
 
 var audioAnnotationRe = regexp.MustCompile(`\[(voice|audio)(?::[^\]]*)?\]`)
@@ -757,14 +788,16 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		})
 
 	opts := processOptions{
-		SessionKey:      sessionKey,
-		Channel:         msg.Channel,
-		ChatID:          msg.ChatID,
-		UserMessage:     msg.Content,
-		Media:           msg.Media,
-		DefaultResponse: defaultResponse,
-		EnableSummary:   true,
-		SendResponse:    false,
+		SessionKey:        sessionKey,
+		Channel:           msg.Channel,
+		ChatID:            msg.ChatID,
+		SenderID:          msg.SenderID,
+		SenderDisplayName: msg.Sender.DisplayName,
+		UserMessage:       msg.Content,
+		Media:             msg.Media,
+		DefaultResponse:   defaultResponse,
+		EnableSummary:     true,
+		SendResponse:      false,
 	}
 
 	// context-dependent commands check their own Runtime fields and report
@@ -923,6 +956,8 @@ func (al *AgentLoop) runAgentLoop(
 		opts.Media,
 		opts.Channel,
 		opts.ChatID,
+		opts.SenderID,
+		opts.SenderDisplayName,
 	)
 
 	// Resolve media:// refs: images→base64 data URLs, non-images→local paths in content
@@ -1042,6 +1077,7 @@ func (al *AgentLoop) handleReasoning(
 }
 
 // runLLMIteration executes the LLM call loop with tool handling.
+// Returns (finalContent, iteration, error).
 func (al *AgentLoop) runLLMIteration(
 	ctx context.Context,
 	agent *AgentInstance,
@@ -1050,6 +1086,13 @@ func (al *AgentLoop) runLLMIteration(
 ) (string, int, error) {
 	iteration := 0
 	var finalContent string
+
+	// Check if both the provider and channel support streaming
+	streamProvider, providerCanStream := agent.Provider.(providers.StreamingProvider)
+	var streamer bus.Streamer
+	if providerCanStream && !opts.NoHistory && !constants.IsInternalChannel(opts.Channel) {
+		streamer, _ = al.bus.GetStreamer(ctx, opts.Channel, opts.ChatID)
+	}
 
 	// Determine effective model tier for this conversation turn.
 	// selectCandidates evaluates routing once and the decision is sticky for
@@ -1084,6 +1127,19 @@ func (al *AgentLoop) runLLMIteration(
 			}
 		}
 
+		// Determine whether the provider's native web search should replace
+		// the client-side web_search tool for this request. Only enable when web
+		// search is actually enabled and registered (so users who disabled web
+		// access do not get provider-side search or billing).
+		_, hasWebSearch := agent.Tools.Get("web_search")
+		useNativeSearch := al.cfg.Tools.Web.PreferNative &&
+			isNativeSearchProvider(agent.Provider) &&
+			hasWebSearch
+
+		if useNativeSearch {
+			providerToolDefs = filterClientWebSearch(providerToolDefs)
+		}
+
 		// Log LLM request details
 		logger.DebugCF("agent", "LLM request",
 			map[string]any{
@@ -1092,6 +1148,7 @@ func (al *AgentLoop) runLLMIteration(
 				"model":             activeModel,
 				"messages_count":    len(messages),
 				"tools_count":       len(providerToolDefs),
+				"native_search":     useNativeSearch,
 				"max_tokens":        effectiveMaxTokens,
 				"temperature":       agent.Temperature,
 				"system_prompt_len": len(messages[0].Content),
@@ -1114,6 +1171,9 @@ func (al *AgentLoop) runLLMIteration(
 			"temperature":      agent.Temperature,
 			"prompt_cache_key": agent.ID,
 		}
+		if useNativeSearch {
+			llmOpts["native_search"] = true
+		}
 		// parseThinkingLevel guarantees ThinkingOff for empty/unknown values,
 		// so checking != ThinkingOff is sufficient.
 		if agent.ThinkingLevel != ThinkingOff {
@@ -1129,11 +1189,18 @@ func (al *AgentLoop) runLLMIteration(
 			al.activeRequests.Add(1)
 			defer al.activeRequests.Done()
 
-			// Use streaming provider when a stream callback is set and the provider supports it.
-			if opts.StreamCallback != nil {
-				if sp, ok := agent.Provider.(providers.StreamingProvider); ok {
-					return sp.ChatStream(ctx, messages, providerToolDefs, activeModel, llmOpts, opts.StreamCallback)
-				}
+			// Use streaming when available (streamer obtained, provider supports it)
+			if streamer != nil && streamProvider != nil {
+				var accumulated string
+				return streamProvider.ChatStream(
+					ctx, messages, providerToolDefs, activeModel, llmOpts,
+					func(ev providers.StreamEvent) {
+						if ev.Type == "delta" {
+							accumulated += ev.Content
+							streamer.Update(ctx, accumulated)
+						}
+					},
+				)
 			}
 
 			if len(activeCandidates) > 1 && al.fallback != nil {
@@ -1236,7 +1303,7 @@ func (al *AgentLoop) runLLMIteration(
 				newSummary := agent.Sessions.GetSummary(opts.SessionKey)
 				messages = agent.ContextBuilder.BuildMessages(
 					newHistory, newSummary, "",
-					nil, opts.Channel, opts.ChatID,
+					nil, opts.Channel, opts.ChatID, opts.SenderID, opts.SenderDisplayName,
 				)
 				continue
 			}
@@ -1277,13 +1344,29 @@ func (al *AgentLoop) runLLMIteration(
 			if finalContent == "" && response.ReasoningContent != "" {
 				finalContent = response.ReasoningContent
 			}
+
+			// If we were streaming, finalize the message (sends the permanent message)
+			if streamer != nil {
+				if err := streamer.Finalize(ctx, finalContent); err != nil {
+					logger.WarnCF("agent", "Stream finalize failed", map[string]any{
+						"error": err.Error(),
+					})
+				}
+			}
+
 			logger.InfoCF("agent", "LLM response without tool calls (direct answer)",
 				map[string]any{
 					"agent_id":      agent.ID,
 					"iteration":     iteration,
 					"content_chars": len(finalContent),
+					"streamed":      streamer != nil,
 				})
 			break
+		}
+
+		// Tool calls detected — cancel any active stream (draft auto-expires)
+		if streamer != nil {
+			streamer.Cancel(ctx)
 		}
 
 		normalizedToolCalls := make([]providers.ToolCall, 0, len(response.ToolCalls))
@@ -1361,6 +1444,22 @@ func (al *AgentLoop) runLLMIteration(
 						"tool":      tc.Name,
 						"iteration": iteration,
 					})
+
+				// Send tool feedback to chat channel if enabled
+				if al.cfg.Agents.Defaults.IsToolFeedbackEnabled() && opts.Channel != "" {
+					feedbackPreview := utils.Truncate(
+						string(argsJSON),
+						al.cfg.Agents.Defaults.GetToolFeedbackMaxArgsLength(),
+					)
+					feedbackMsg := fmt.Sprintf("\U0001f527 `%s`\n```\n%s\n```", tc.Name, feedbackPreview)
+					fbCtx, fbCancel := context.WithTimeout(ctx, 3*time.Second)
+					_ = al.bus.PublishOutbound(fbCtx, bus.OutboundMessage{
+						Channel: opts.Channel,
+						ChatID:  opts.ChatID,
+						Content: feedbackMsg,
+					})
+					fbCancel()
+				}
 
 				// Create async callback for tools that implement AsyncExecutor.
 				// When the background work completes, this publishes the result
@@ -1538,7 +1637,7 @@ func (al *AgentLoop) selectCandidates(
 	history []providers.Message,
 ) (candidates []providers.FallbackCandidate, model string) {
 	if agent.Router == nil || len(agent.LightCandidates) == 0 {
-		return agent.Candidates, agent.Model
+		return agent.Candidates, resolvedCandidateModel(agent.Candidates, agent.Model)
 	}
 
 	_, usedLight, score := agent.Router.SelectModel(userMsg, history, agent.Model)
@@ -1549,7 +1648,7 @@ func (al *AgentLoop) selectCandidates(
 				"score":     score,
 				"threshold": agent.Router.Threshold(),
 			})
-		return agent.Candidates, agent.Model
+		return agent.Candidates, resolvedCandidateModel(agent.Candidates, agent.Model)
 	}
 
 	logger.InfoCF("agent", "Model routing: light model selected",
@@ -1559,7 +1658,7 @@ func (al *AgentLoop) selectCandidates(
 			"score":       score,
 			"threshold":   agent.Router.Threshold(),
 		})
-	return agent.LightCandidates, agent.Router.LightModel()
+	return agent.LightCandidates, resolvedCandidateModel(agent.LightCandidates, agent.Router.LightModel())
 }
 
 // maybeSummarize triggers summarization if the session history exceeds thresholds.
@@ -2029,13 +2128,45 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance, opts *processOpt
 			return nil
 		},
 	}
+	rt.ReloadConfig = func() error {
+		if al.reloadFunc == nil {
+			return fmt.Errorf("reload not configured")
+		}
+		return al.reloadFunc()
+	}
 	if agent != nil {
 		rt.GetModelInfo = func() (string, string) {
-			return agent.Model, cfg.Agents.Defaults.Provider
+			return agent.Model, resolvedCandidateProvider(agent.Candidates, cfg.Agents.Defaults.Provider)
 		}
 		rt.SwitchModel = func(value string) (string, error) {
+			value = strings.TrimSpace(value)
+			modelCfg, err := resolvedModelConfig(cfg, value, agent.Workspace)
+			if err != nil {
+				return "", err
+			}
+
+			nextProvider, _, err := providers.CreateProviderFromConfig(modelCfg)
+			if err != nil {
+				return "", fmt.Errorf("failed to initialize model %q: %w", value, err)
+			}
+
+			nextCandidates := resolveModelCandidates(cfg, cfg.Agents.Defaults.Provider, modelCfg.Model, agent.Fallbacks)
+			if len(nextCandidates) == 0 {
+				return "", fmt.Errorf("model %q did not resolve to any provider candidates", value)
+			}
+
 			oldModel := agent.Model
+			oldProvider := agent.Provider
 			agent.Model = value
+			agent.Provider = nextProvider
+			agent.Candidates = nextCandidates
+			agent.ThinkingLevel = parseThinkingLevel(modelCfg.ThinkingLevel)
+
+			if oldProvider != nil && oldProvider != nextProvider {
+				if stateful, ok := oldProvider.(providers.StatefulProvider); ok {
+					stateful.Close()
+				}
+			}
 			return oldModel, nil
 		}
 
@@ -2136,6 +2267,28 @@ func extractParentPeer(msg bus.InboundMessage) *routing.RoutePeer {
 		return nil
 	}
 	return &routing.RoutePeer{Kind: parentKind, ID: parentID}
+}
+
+// isNativeSearchProvider reports whether the given LLM provider implements
+// NativeSearchCapable and returns true for SupportsNativeSearch.
+func isNativeSearchProvider(p providers.LLMProvider) bool {
+	if ns, ok := p.(providers.NativeSearchCapable); ok {
+		return ns.SupportsNativeSearch()
+	}
+	return false
+}
+
+// filterClientWebSearch returns a copy of tools with the client-side
+// web_search tool removed. Used when native provider search is preferred.
+func filterClientWebSearch(tools []providers.ToolDefinition) []providers.ToolDefinition {
+	result := make([]providers.ToolDefinition, 0, len(tools))
+	for _, t := range tools {
+		if strings.EqualFold(t.Function.Name, "web_search") {
+			continue
+		}
+		result = append(result, t)
+	}
+	return result
 }
 
 // Helper to extract provider from registry for cleanup
