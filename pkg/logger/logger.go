@@ -1,25 +1,27 @@
 package logger
 
 import (
+	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
-
-	"github.com/rs/zerolog"
+	"time"
 )
 
-type LogLevel = zerolog.Level
+// LogLevel mirrors slog.Level so callers don't need to import slog.
+type LogLevel = slog.Level
 
 const (
-	DEBUG = zerolog.DebugLevel
-	INFO  = zerolog.InfoLevel
-	WARN  = zerolog.WarnLevel
-	ERROR = zerolog.ErrorLevel
-	FATAL = zerolog.FatalLevel
+	DEBUG = slog.LevelDebug
+	INFO  = slog.LevelInfo
+	WARN  = slog.LevelWarn
+	ERROR = slog.LevelError
+	FATAL = slog.Level(12) // slog has no FATAL; define above ERROR
 )
 
 var (
@@ -31,79 +33,40 @@ var (
 		FATAL: "FATAL",
 	}
 
-	currentLevel = INFO
-	logger       zerolog.Logger
-	fileLogger   zerolog.Logger
-	logFile      *os.File
-	once         sync.Once
-	mu           sync.RWMutex
+	currentLevel slog.LevelVar
+	consoleLevel slog.LevelVar
+	fileLevel    slog.LevelVar
+
+	consoleSlog *slog.Logger
+	fileSlog    *slog.Logger
+	logFile     *os.File
+	mu          sync.RWMutex
 )
 
 func init() {
-	once.Do(func() {
-		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	currentLevel.Set(INFO)
+	consoleLevel.Set(INFO)
 
-		consoleWriter := zerolog.ConsoleWriter{
-			Out:        os.Stdout,
-			TimeFormat: "15:04:05", // TODO: make it configurable???
-
-			// Custom formatter to handle multiline strings and JSON objects
-			FormatFieldValue: formatFieldValue,
-		}
-
-		logger = zerolog.New(consoleWriter).With().Timestamp().Caller().Logger()
-		fileLogger = zerolog.Logger{}
-	})
-}
-
-func formatFieldValue(i any) string {
-	var s string
-
-	switch val := i.(type) {
-	case string:
-		s = val
-	case []byte:
-		s = string(val)
-	default:
-		return fmt.Sprintf("%v", i)
-	}
-
-	if unquoted, err := strconv.Unquote(s); err == nil {
-		s = unquoted
-	}
-
-	if strings.Contains(s, "\n") {
-		return fmt.Sprintf("\n%s", s)
-	}
-
-	if strings.Contains(s, " ") {
-		if (strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}")) ||
-			(strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]")) {
-			return s
-		}
-		return fmt.Sprintf("%q", s)
-	}
-
-	return s
+	consoleSlog = slog.New(newColorHandler(os.Stdout, &consoleLevel))
+	fileSlog = nil
 }
 
 func SetLevel(level LogLevel) {
 	mu.Lock()
 	defer mu.Unlock()
-	currentLevel = level
-	zerolog.SetGlobalLevel(level)
+	currentLevel.Set(level)
 }
 
 func SetConsoleLevel(level LogLevel) {
 	mu.Lock()
 	defer mu.Unlock()
-	logger = logger.Level(level)
+	consoleLevel.Set(level)
 }
 
 func SetFileLevel(level LogLevel) {
 	mu.Lock()
 	defer mu.Unlock()
-	fileLogger = fileLogger.Level(level)
+	fileLevel.Set(level)
 }
 
 // ParseLevel converts a level string to a LogLevel. Case-insensitive.
@@ -126,9 +89,7 @@ func ParseLevel(s string) LogLevel {
 }
 
 func GetLevel() LogLevel {
-	mu.RLock()
-	defer mu.RUnlock()
-	return currentLevel
+	return currentLevel.Level()
 }
 
 // SetLevelFromString sets the log level from a string value.
@@ -153,13 +114,15 @@ func EnableFileLogging(filePath string) error {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
 
-	// Close old file if exists
 	if logFile != nil {
 		logFile.Close()
 	}
 
 	logFile = newFile
-	fileLogger = zerolog.New(logFile).With().Timestamp().Caller().Logger()
+	fileSlog = slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{
+		Level:     &fileLevel,
+		AddSource: true,
+	}))
 	return nil
 }
 
@@ -171,108 +134,46 @@ func DisableFileLogging() {
 		logFile.Close()
 		logFile = nil
 	}
-	fileLogger = zerolog.Logger{}
-}
-
-func getCallerSkip() int {
-	for i := 2; i < 15; i++ {
-		pc, file, _, ok := runtime.Caller(i)
-		if !ok {
-			continue
-		}
-
-		fn := runtime.FuncForPC(pc)
-		if fn == nil {
-			continue
-		}
-
-		// bypass common loggers
-		if strings.HasSuffix(file, "/logger.go") ||
-			strings.HasSuffix(file, "/logger_3rd_party.go") ||
-			strings.HasSuffix(file, "/log.go") {
-			continue
-		}
-
-		funcName := fn.Name()
-		if strings.HasPrefix(funcName, "runtime.") {
-			continue
-		}
-
-		return i - 1
-	}
-
-	return 3
-}
-
-//nolint:zerologlint
-func getEvent(logger zerolog.Logger, level LogLevel) *zerolog.Event {
-	switch level {
-	case zerolog.DebugLevel:
-		return logger.Debug()
-	case zerolog.InfoLevel:
-		return logger.Info()
-	case zerolog.WarnLevel:
-		return logger.Warn()
-	case zerolog.ErrorLevel:
-		return logger.Error()
-	case zerolog.FatalLevel:
-		return logger.Fatal()
-	default:
-		return logger.Info()
-	}
+	fileSlog = nil
 }
 
 func logMessage(level LogLevel, component string, message string, fields map[string]any) {
-	if level < currentLevel {
+	if level < currentLevel.Level() {
 		return
 	}
 
-	skip := getCallerSkip()
-
-	event := getEvent(logger, level)
-
+	// Build attrs slice: component first, then fields.
+	attrs := make([]slog.Attr, 0, len(fields)+1)
 	if component != "" {
-		event.Str("component", component)
+		attrs = append(attrs, slog.String("component", component))
 	}
-
-	appendFields(event, fields)
-	event.CallerSkipFrame(skip).Msg(message)
-
-	// Also log to file if enabled
-	if fileLogger.GetLevel() != zerolog.NoLevel {
-		fileEvent := getEvent(fileLogger, level)
-
-		if component != "" {
-			fileEvent.Str("component", component)
-		}
-		// fileEvent.Str("caller", fmt.Sprintf("%s:%d (%s)", callerFile, callerLine, callerFunc))
-
-		appendFields(fileEvent, fields)
-		fileEvent.CallerSkipFrame(skip).Msg(message)
-	}
-
-	if level == FATAL {
-		os.Exit(1)
-	}
-}
-
-func appendFields(event *zerolog.Event, fields map[string]any) {
 	for k, v := range fields {
-		// Type switch to avoid double JSON serialization of strings
-		switch val := v.(type) {
-		case string:
-			event.Str(k, val)
-		case int:
-			event.Int(k, val)
-		case int64:
-			event.Int64(k, val)
-		case float64:
-			event.Float64(k, val)
-		case bool:
-			event.Bool(k, val)
-		default:
-			event.Interface(k, v) // Fallback for struct, slice and maps
-		}
+		attrs = append(attrs, slog.Any(k, v))
+	}
+
+	// Resolve caller outside the logger so both outputs share it.
+	var pcs [1]uintptr
+	// skip: runtime.Callers, logMessage, public wrapper (e.g. Info/DebugCF)
+	runtime.Callers(3, pcs[:])
+
+	rec := slog.NewRecord(time.Now(), level, message, pcs[0])
+	rec.AddAttrs(attrs...)
+
+	mu.RLock()
+	cs := consoleSlog
+	fs := fileSlog
+	mu.RUnlock()
+
+	ctx := context.Background()
+	if cs != nil {
+		_ = cs.Handler().Handle(ctx, rec)
+	}
+	if fs != nil {
+		_ = fs.Handler().Handle(ctx, rec)
+	}
+
+	if level >= FATAL {
+		os.Exit(1)
 	}
 }
 
@@ -370,4 +271,106 @@ func FatalF(message string, fields map[string]any) {
 
 func FatalCF(component string, message string, fields map[string]any) {
 	logMessage(FATAL, component, message, fields)
+}
+
+// --- Color console handler ---
+
+// colorHandler is a slog.Handler that writes colored, human-readable output.
+type colorHandler struct {
+	w     io.Writer
+	level *slog.LevelVar
+}
+
+func newColorHandler(w io.Writer, level *slog.LevelVar) *colorHandler {
+	return &colorHandler{w: w, level: level}
+}
+
+func (h *colorHandler) Enabled(_ context.Context, level slog.Level) bool {
+	return level >= h.level.Level()
+}
+
+func (h *colorHandler) Handle(_ context.Context, r slog.Record) error {
+	if !h.Enabled(context.Background(), r.Level) {
+		return nil
+	}
+
+	var buf strings.Builder
+
+	// Time
+	buf.WriteString("\033[90m")
+	buf.WriteString(r.Time.Format("15:04:05"))
+	buf.WriteString("\033[0m ")
+
+	// Level with color
+	switch {
+	case r.Level >= FATAL:
+		buf.WriteString("\033[35;1mFTL\033[0m ")
+	case r.Level >= ERROR:
+		buf.WriteString("\033[31mERR\033[0m ")
+	case r.Level >= WARN:
+		buf.WriteString("\033[33mWRN\033[0m ")
+	case r.Level >= INFO:
+		buf.WriteString("\033[32mINF\033[0m ")
+	default:
+		buf.WriteString("DBG ")
+	}
+
+	// Source (caller)
+	if r.PC != 0 {
+		fs := runtime.CallersFrames([]uintptr{r.PC})
+		f, _ := fs.Next()
+		if f.File != "" {
+			short := filepath.Base(f.File)
+			buf.WriteString("\033[1m")
+			buf.WriteString(short)
+			buf.WriteByte(':')
+			fmt.Fprintf(&buf, "%d", f.Line)
+			buf.WriteString("\033[0m")
+			buf.WriteString("\033[36m >\033[0m ")
+		}
+	}
+
+	// Message (bold for WARN+)
+	if r.Level >= WARN {
+		buf.WriteString("\033[1m")
+		buf.WriteString(r.Message)
+		buf.WriteString("\033[0m")
+	} else {
+		buf.WriteString(r.Message)
+	}
+
+	// Attrs
+	r.Attrs(func(a slog.Attr) bool {
+		buf.WriteByte(' ')
+		buf.WriteString("\033[36m")
+		buf.WriteString(a.Key)
+		buf.WriteByte('=')
+		buf.WriteString("\033[0m")
+
+		v := a.Value.Resolve()
+		switch v.Kind() {
+		case slog.KindString:
+			s := v.String()
+			if strings.Contains(s, " ") || strings.Contains(s, "\n") {
+				fmt.Fprintf(&buf, "%q", s)
+			} else {
+				buf.WriteString(s)
+			}
+		default:
+			buf.WriteString(v.String())
+		}
+		return true
+	})
+
+	buf.WriteByte('\n')
+	_, err := io.WriteString(h.w, buf.String())
+	return err
+}
+
+func (h *colorHandler) WithAttrs(_ []slog.Attr) slog.Handler {
+	return h // no pre-attached attrs needed for this use case
+}
+
+func (h *colorHandler) WithGroup(_ string) slog.Handler {
+	return h // no groups needed
 }
