@@ -18,6 +18,15 @@
             "command": "INPUT=$(cat); FILE=$(echo \"$INPUT\" | jq -r '.tool_input.file_path // \"\"' 2>/dev/null); if echo \"$FILE\" | grep -qE 'web/frontend/.*\\.(ts|tsx|js|jsx|css)$'; then cd web/frontend && npx prettier --write \"$FILE\" 2>/dev/null; fi"
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); FILE=$(echo \"$INPUT\" | jq -r '.tool_input.file_path // \"\"' 2>/dev/null); if echo \"$FILE\" | grep -qE '\\.go$'; then PKG=$(dirname \"$FILE\"); cd /home/openclaw/picoclaw && go vet ./$(realpath --relative-to=. \"$PKG\")/... 2>&1 | head -20; fi"
+          }
+        ]
       }
     ],
     "PreToolUse": [
@@ -27,6 +36,15 @@
           {
             "type": "command",
             "command": "INPUT=$(cat); FILE=$(echo \"$INPUT\" | jq -r '.tool_input.file_path // \"\"' 2>/dev/null); if echo \"$FILE\" | grep -qE '\\.(env|key|pem|secret)$'; then echo 'BLOCK: Refusing to edit sensitive file' >&2; exit 2; fi"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); FILE=$(echo \"$INPUT\" | jq -r '.tool_input.file_path // \"\"' 2>/dev/null); if echo \"$FILE\" | grep -qE '(go\\.sum|pnpm-lock\\.yaml)$'; then echo 'BLOCK: Do not edit lock files directly. Use go mod tidy or pnpm install.' >&2; exit 2; fi"
           }
         ]
       }
