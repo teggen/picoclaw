@@ -9,6 +9,15 @@
             "command": "INPUT=$(cat); FILE=$(echo \"$INPUT\" | jq -r '.tool_input.file_path // \"\"' 2>/dev/null); if echo \"$FILE\" | grep -qE '\\.go$'; then make fmt 2>/dev/null; fi"
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); FILE=$(echo \"$INPUT\" | jq -r '.tool_input.file_path // \"\"' 2>/dev/null); if echo \"$FILE\" | grep -qE 'web/frontend/.*\\.(ts|tsx|js|jsx|css)$'; then cd web/frontend && npx prettier --write \"$FILE\" 2>/dev/null; fi"
+          }
+        ]
       }
     ],
     "PreToolUse": [
