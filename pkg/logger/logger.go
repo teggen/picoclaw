@@ -131,6 +131,15 @@ func GetLevel() LogLevel {
 	return currentLevel
 }
 
+// SetLevelFromString sets the log level from a string value.
+// If the string is empty, the current level is kept.
+func SetLevelFromString(s string) {
+	if s == "" {
+		return
+	}
+	SetLevel(ParseLevel(s))
+}
+
 func EnableFileLogging(filePath string) error {
 	mu.Lock()
 	defer mu.Unlock()

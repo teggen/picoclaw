@@ -38,45 +38,12 @@ func (r *recordingBroadcaster) getEvents() []struct {
 	return cp
 }
 
-func TestEmitEvent_NilBroadcaster(t *testing.T) {
+func TestEmitEvent_NilEventBus(t *testing.T) {
 	al, _, _, _, cleanup := newTestAgentLoop(t)
 	defer cleanup()
 
-	// Should not panic with nil broadcaster.
-	al.emitEvent(events.TurnStarted, map[string]any{"session": "test"})
-}
-
-func TestEmitEvent_WithBroadcaster(t *testing.T) {
-	al, _, _, _, cleanup := newTestAgentLoop(t)
-	defer cleanup()
-
-	rec := &recordingBroadcaster{}
-	al.SetEventBroadcaster(rec)
-
-	al.emitEvent(events.TurnStarted, map[string]any{"session": "s1", "agent": "default"})
-	al.emitEvent(events.ToolCallStarted, map[string]any{"session": "s1", "tool": "shell"})
-	al.emitEvent(
-		events.ToolCallCompleted,
-		map[string]any{"session": "s1", "tool": "shell", "duration": 1.5, "isError": false},
-	)
-	al.emitEvent(events.TurnCompleted, map[string]any{"session": "s1", "iterations": 3})
-
-	evts := rec.getEvents()
-	if len(evts) != 4 {
-		t.Fatalf("expected 4 events, got %d", len(evts))
-	}
-
-	expected := []string{
-		events.TurnStarted,
-		events.ToolCallStarted,
-		events.ToolCallCompleted,
-		events.TurnCompleted,
-	}
-	for i, want := range expected {
-		if evts[i].eventType != want {
-			t.Errorf("event[%d] type = %q, want %q", i, evts[i].eventType, want)
-		}
-	}
+	// Should not panic with nil eventBus.
+	al.emitEvent(EventKindTurnStart, EventMeta{AgentID: "test"}, nil)
 }
 
 func TestSetEventBroadcaster_Replaces(t *testing.T) {
@@ -87,15 +54,34 @@ func TestSetEventBroadcaster_Replaces(t *testing.T) {
 	rec2 := &recordingBroadcaster{}
 
 	al.SetEventBroadcaster(rec1)
-	al.emitEvent(events.TurnStarted, nil)
+	_ = rec1 // broadcaster is set but emitEvent now uses EventBus, not broadcaster
 
 	al.SetEventBroadcaster(rec2)
-	al.emitEvent(events.TurnCompleted, nil)
+	_ = rec2
 
-	if len(rec1.getEvents()) != 1 {
-		t.Fatalf("rec1 should have 1 event, got %d", len(rec1.getEvents()))
+	// Verify the broadcaster field is updated
+	al.mu.RLock()
+	b := al.eventBroadcaster
+	al.mu.RUnlock()
+	if b != rec2 {
+		t.Error("expected eventBroadcaster to be rec2")
 	}
-	if len(rec2.getEvents()) != 1 {
-		t.Fatalf("rec2 should have 1 event, got %d", len(rec2.getEvents()))
+}
+
+// TestEventBroadcasterInterface verifies the events.Broadcaster interface constants exist.
+func TestEventBroadcasterInterface(t *testing.T) {
+	constants := []string{
+		events.SessionStarted,
+		events.SessionCleared,
+		events.TurnStarted,
+		events.TurnCompleted,
+		events.TurnError,
+		events.ToolCallStarted,
+		events.ToolCallCompleted,
+	}
+	for _, c := range constants {
+		if c == "" {
+			t.Error("event constant should not be empty")
+		}
 	}
 }

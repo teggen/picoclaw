@@ -341,7 +341,8 @@ func TestIntegration_WebSocket_MultipleClients(t *testing.T) {
 	ws2 := h.dialWS(t, "multi-2")
 	defer ws2.Close()
 
-	// Send message from client 1.
+	// Send message from client 1 and wait for response before sending client 2.
+	// Steering mode "one-at-a-time" queues concurrent messages, so we serialize.
 	send1 := APIMessage{
 		Type:      TypeMessageSend,
 		SessionID: "multi-1",
@@ -351,17 +352,6 @@ func TestIntegration_WebSocket_MultipleClients(t *testing.T) {
 		t.Fatalf("ws1 WriteJSON: %v", err)
 	}
 
-	// Send message from client 2.
-	send2 := APIMessage{
-		Type:      TypeMessageSend,
-		SessionID: "multi-2",
-		Payload:   map[string]any{"content": "From client 2"},
-	}
-	if err := ws2.WriteJSON(send2); err != nil {
-		t.Fatalf("ws2 WriteJSON: %v", err)
-	}
-
-	// Both clients should receive their own responses.
 	resp1 := readWSMessage(t, ws1, 10*time.Second)
 	if resp1.Type != TypeMessageCreate {
 		t.Fatalf("ws1: expected %q, got %q", TypeMessageCreate, resp1.Type)
@@ -369,6 +359,16 @@ func TestIntegration_WebSocket_MultipleClients(t *testing.T) {
 	content1, _ := resp1.Payload["content"].(string)
 	if content1 != expected {
 		t.Fatalf("ws1: expected content %q, got %q", expected, content1)
+	}
+
+	// Now send message from client 2.
+	send2 := APIMessage{
+		Type:      TypeMessageSend,
+		SessionID: "multi-2",
+		Payload:   map[string]any{"content": "From client 2"},
+	}
+	if err := ws2.WriteJSON(send2); err != nil {
+		t.Fatalf("ws2 WriteJSON: %v", err)
 	}
 
 	resp2 := readWSMessage(t, ws2, 10*time.Second)

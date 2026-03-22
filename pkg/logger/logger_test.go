@@ -255,6 +255,12 @@ func TestFormatFieldValue(t *testing.T) {
 	}
 }
 
+func TestDefaultLevelIsInfo(t *testing.T) {
+	if logLevelNames[INFO] != "INFO" {
+		t.Errorf("INFO constant mapped to %q, want \"INFO\"", logLevelNames[INFO])
+	}
+}
+
 func TestParseLevel(t *testing.T) {
 	tests := []struct {
 		input string
@@ -268,8 +274,12 @@ func TestParseLevel(t *testing.T) {
 		{"warn", WARN},
 		{"WARN", WARN},
 		{"warning", WARN},
+		{"WARNING", WARN},
 		{"error", ERROR},
+		{"ERROR", ERROR},
 		{"fatal", FATAL},
+		{"FATAL", FATAL},
+		{"  info  ", INFO},
 		{"", INFO},
 		{"unknown", INFO},
 		{"  debug  ", DEBUG},
@@ -289,7 +299,6 @@ func TestSetFileLevel(t *testing.T) {
 	initialLevel := GetLevel()
 	defer SetLevel(initialLevel)
 
-	// Enable file logging to a temp file so fileLogger is active
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "test.log")
 	if err := EnableFileLogging(logPath); err != nil {
@@ -297,14 +306,10 @@ func TestSetFileLevel(t *testing.T) {
 	}
 	defer DisableFileLogging()
 
-	// Set global level to DEBUG so messages reach logMessage
 	SetLevel(DEBUG)
-
-	// Set console to ERROR, file to DEBUG — they should be independent
 	SetConsoleLevel(ERROR)
 	SetFileLevel(DEBUG)
 
-	// Log a debug message — should appear in file but not console
 	Debug("file-level-test-message")
 
 	content, err := os.ReadFile(logPath)
@@ -323,20 +328,14 @@ func TestApplyConfig(t *testing.T) {
 	defer DisableFileLogging()
 
 	t.Run("debug flag overrides config", func(t *testing.T) {
-		ApplyConfig(LoggingConfig{
-			Level: "error",
-		}, true)
-
+		ApplyConfig(LoggingConfig{Level: "error"}, true)
 		if GetLevel() != DEBUG {
 			t.Errorf("Expected DEBUG level when debug=true, got %v", GetLevel())
 		}
 	})
 
 	t.Run("global level from config", func(t *testing.T) {
-		ApplyConfig(LoggingConfig{
-			Level: "warn",
-		}, false)
-
+		ApplyConfig(LoggingConfig{Level: "warn"}, false)
 		if GetLevel() != WARN {
 			t.Errorf("Expected WARN level, got %v", GetLevel())
 		}
@@ -345,39 +344,24 @@ func TestApplyConfig(t *testing.T) {
 	t.Run("file logging enabled", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		logPath := filepath.Join(tmpDir, "test.log")
-
 		ApplyConfig(LoggingConfig{
-			Level: "info",
-			FileLogging: FileLogConfig{
-				Enabled: true,
-				Path:    logPath,
-				Level:   "debug",
-			},
+			Level:       "info",
+			FileLogging: FileLogConfig{Enabled: true, Path: logPath, Level: "debug"},
 		}, false)
-
-		// Global level should be DEBUG (minimum of info and debug)
 		if GetLevel() != DEBUG {
 			t.Errorf("Expected DEBUG as global minimum, got %v", GetLevel())
 		}
-
-		// Verify file was created
 		if _, err := os.Stat(logPath); os.IsNotExist(err) {
 			t.Error("Expected log file to be created")
 		}
-
 		DisableFileLogging()
 	})
 
 	t.Run("console level override", func(t *testing.T) {
 		ApplyConfig(LoggingConfig{
-			Level: "debug",
-			Console: ConsoleLogConfig{
-				Level: "warn",
-			},
+			Level:   "debug",
+			Console: ConsoleLogConfig{Level: "warn"},
 		}, false)
-
-		// Global level should still be debug (console is warn but no file)
-		// Actually global is set to console level since file is disabled
 		if GetLevel() != WARN {
 			t.Errorf("Expected WARN (console override, no file), got %v", GetLevel())
 		}
@@ -386,24 +370,35 @@ func TestApplyConfig(t *testing.T) {
 	t.Run("file more verbose than console", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		logPath := filepath.Join(tmpDir, "test.log")
-
 		ApplyConfig(LoggingConfig{
-			Level: "info",
-			FileLogging: FileLogConfig{
-				Enabled: true,
-				Path:    logPath,
-				Level:   "debug",
-			},
-			Console: ConsoleLogConfig{
-				Level: "warn",
-			},
+			Level:       "info",
+			FileLogging: FileLogConfig{Enabled: true, Path: logPath, Level: "debug"},
+			Console:     ConsoleLogConfig{Level: "warn"},
 		}, false)
-
-		// Global should be DEBUG (min of warn, debug)
 		if GetLevel() != DEBUG {
 			t.Errorf("Expected DEBUG as global minimum, got %v", GetLevel())
 		}
-
 		DisableFileLogging()
 	})
+}
+
+func TestSetLevelFromString(t *testing.T) {
+	initialLevel := GetLevel()
+	defer SetLevel(initialLevel)
+
+	SetLevel(INFO)
+	SetLevelFromString("error")
+	if got := GetLevel(); got != ERROR {
+		t.Errorf("after SetLevelFromString(\"error\"): GetLevel() = %v, want ERROR", got)
+	}
+
+	SetLevelFromString("")
+	if got := GetLevel(); got != ERROR {
+		t.Errorf("after SetLevelFromString(\"\"): GetLevel() = %v, want ERROR (unchanged)", got)
+	}
+
+	SetLevelFromString("FATAL")
+	if got := GetLevel(); got != FATAL {
+		t.Errorf("after SetLevelFromString(\"FATAL\"): GetLevel() = %v, want FATAL", got)
+	}
 }

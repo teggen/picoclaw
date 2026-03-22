@@ -115,13 +115,19 @@ func NewAgentInstance(
 		}
 		codingBackend := tools.NewCodingAgentBackendFromConfig(caCfg)
 		if codingBackend == nil {
-			logger.WarnF("coding_agent tool enabled but backend is not recognized", map[string]any{"backend": caCfg.Backend})
+			logger.WarnF(
+				"coding_agent tool enabled but backend is not recognized",
+				map[string]any{"backend": caCfg.Backend},
+			)
 		} else if !codingBackend.Available() {
 			cmd := caCfg.Command
 			if cmd == "" {
 				cmd = "claude"
 			}
-			logger.WarnF("coding_agent tool enabled but CLI not found in PATH — tool will not be registered", map[string]any{"command": cmd})
+			logger.WarnF(
+				"coding_agent tool enabled but CLI not found in PATH — tool will not be registered",
+				map[string]any{"command": cmd},
+			)
 		} else {
 			caTool := tools.NewCodingAgentTool(codingBackend, workspace, caCfg)
 			toolsRegistry.Register(caTool)
