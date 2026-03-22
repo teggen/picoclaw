@@ -100,6 +100,31 @@ func SetConsoleLevel(level LogLevel) {
 	logger = logger.Level(level)
 }
 
+func SetFileLevel(level LogLevel) {
+	mu.Lock()
+	defer mu.Unlock()
+	fileLogger = fileLogger.Level(level)
+}
+
+// ParseLevel converts a level string to a LogLevel. Case-insensitive.
+// Returns INFO if the string is empty or unrecognized.
+func ParseLevel(s string) LogLevel {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "debug":
+		return DEBUG
+	case "info":
+		return INFO
+	case "warn", "warning":
+		return WARN
+	case "error":
+		return ERROR
+	case "fatal":
+		return FATAL
+	default:
+		return INFO
+	}
+}
+
 func GetLevel() LogLevel {
 	mu.RLock()
 	defer mu.RUnlock()

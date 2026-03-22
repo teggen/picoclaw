@@ -9,6 +9,7 @@ import (
 	"github.com/sipeed/picoclaw/clients/cli/internal/configcmd"
 	"github.com/sipeed/picoclaw/clients/cli/internal/events"
 	"github.com/sipeed/picoclaw/clients/cli/internal/list"
+	"github.com/sipeed/picoclaw/clients/cli/internal/metrics"
 	"github.com/sipeed/picoclaw/clients/cli/internal/session"
 	"github.com/sipeed/picoclaw/clients/cli/internal/status"
 )
@@ -32,6 +33,7 @@ func NewRootCommand() *cobra.Command {
 		configcmd.NewCommand(),
 		chat.NewCommand(),
 		events.NewCommand(),
+		metrics.NewCommand(),
 	)
 
 	return cmd

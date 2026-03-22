@@ -1,6 +1,8 @@
 package logger
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -251,4 +253,157 @@ func TestFormatFieldValue(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseLevel(t *testing.T) {
+	tests := []struct {
+		input string
+		want  LogLevel
+	}{
+		{"debug", DEBUG},
+		{"DEBUG", DEBUG},
+		{"Debug", DEBUG},
+		{"info", INFO},
+		{"INFO", INFO},
+		{"warn", WARN},
+		{"WARN", WARN},
+		{"warning", WARN},
+		{"error", ERROR},
+		{"fatal", FATAL},
+		{"", INFO},
+		{"unknown", INFO},
+		{"  debug  ", DEBUG},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := ParseLevel(tt.input)
+			if got != tt.want {
+				t.Errorf("ParseLevel(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSetFileLevel(t *testing.T) {
+	initialLevel := GetLevel()
+	defer SetLevel(initialLevel)
+
+	// Enable file logging to a temp file so fileLogger is active
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "test.log")
+	if err := EnableFileLogging(logPath); err != nil {
+		t.Fatalf("EnableFileLogging failed: %v", err)
+	}
+	defer DisableFileLogging()
+
+	// Set global level to DEBUG so messages reach logMessage
+	SetLevel(DEBUG)
+
+	// Set console to ERROR, file to DEBUG — they should be independent
+	SetConsoleLevel(ERROR)
+	SetFileLevel(DEBUG)
+
+	// Log a debug message — should appear in file but not console
+	Debug("file-level-test-message")
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("Failed to read log file: %v", err)
+	}
+
+	if len(content) == 0 {
+		t.Error("Expected debug message in file log, but file is empty")
+	}
+}
+
+func TestApplyConfig(t *testing.T) {
+	initialLevel := GetLevel()
+	defer SetLevel(initialLevel)
+	defer DisableFileLogging()
+
+	t.Run("debug flag overrides config", func(t *testing.T) {
+		ApplyConfig(LoggingConfig{
+			Level: "error",
+		}, true)
+
+		if GetLevel() != DEBUG {
+			t.Errorf("Expected DEBUG level when debug=true, got %v", GetLevel())
+		}
+	})
+
+	t.Run("global level from config", func(t *testing.T) {
+		ApplyConfig(LoggingConfig{
+			Level: "warn",
+		}, false)
+
+		if GetLevel() != WARN {
+			t.Errorf("Expected WARN level, got %v", GetLevel())
+		}
+	})
+
+	t.Run("file logging enabled", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		logPath := filepath.Join(tmpDir, "test.log")
+
+		ApplyConfig(LoggingConfig{
+			Level: "info",
+			FileLogging: FileLogConfig{
+				Enabled: true,
+				Path:    logPath,
+				Level:   "debug",
+			},
+		}, false)
+
+		// Global level should be DEBUG (minimum of info and debug)
+		if GetLevel() != DEBUG {
+			t.Errorf("Expected DEBUG as global minimum, got %v", GetLevel())
+		}
+
+		// Verify file was created
+		if _, err := os.Stat(logPath); os.IsNotExist(err) {
+			t.Error("Expected log file to be created")
+		}
+
+		DisableFileLogging()
+	})
+
+	t.Run("console level override", func(t *testing.T) {
+		ApplyConfig(LoggingConfig{
+			Level: "debug",
+			Console: ConsoleLogConfig{
+				Level: "warn",
+			},
+		}, false)
+
+		// Global level should still be debug (console is warn but no file)
+		// Actually global is set to console level since file is disabled
+		if GetLevel() != WARN {
+			t.Errorf("Expected WARN (console override, no file), got %v", GetLevel())
+		}
+	})
+
+	t.Run("file more verbose than console", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		logPath := filepath.Join(tmpDir, "test.log")
+
+		ApplyConfig(LoggingConfig{
+			Level: "info",
+			FileLogging: FileLogConfig{
+				Enabled: true,
+				Path:    logPath,
+				Level:   "debug",
+			},
+			Console: ConsoleLogConfig{
+				Level: "warn",
+			},
+		}, false)
+
+		// Global should be DEBUG (min of warn, debug)
+		if GetLevel() != DEBUG {
+			t.Errorf("Expected DEBUG as global minimum, got %v", GetLevel())
+		}
+
+		DisableFileLogging()
+	})
 }

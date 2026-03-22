@@ -23,14 +23,25 @@ func agentCmd(message, sessionKey, model string, debug bool) error {
 		sessionKey = "cli:default"
 	}
 
-	if debug {
-		logger.SetLevel(logger.DEBUG)
-		fmt.Println("🔍 Debug mode enabled")
-	}
-
 	cfg, err := internal.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("error loading config: %w", err)
+	}
+
+	logger.ApplyConfig(logger.LoggingConfig{
+		Level: cfg.Logging.Level,
+		FileLogging: logger.FileLogConfig{
+			Enabled: cfg.Logging.FileLogging.Enabled,
+			Path:    cfg.Logging.FileLogging.Path,
+			Level:   cfg.Logging.FileLogging.Level,
+		},
+		Console: logger.ConsoleLogConfig{
+			Level: cfg.Logging.Console.Level,
+		},
+	}, debug)
+
+	if debug {
+		fmt.Println("🔍 Debug mode enabled")
 	}
 
 	if model != "" {

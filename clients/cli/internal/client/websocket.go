@@ -167,15 +167,38 @@ type EventFilter struct {
 
 // EventConn is a WebSocket connection for the event stream.
 type EventConn struct {
-	conn   *websocket.Conn
-	msgs   chan EventMessage
-	done   chan struct{}
-	closed bool
-	mu     sync.Mutex
+	conn    *websocket.Conn
+	msgs    chan EventMessage
+	done    chan struct{}
+	writeMu sync.Mutex
+	closed  bool
+	mu      sync.Mutex
+
+	// Reconnection config.
+	baseURL string
+	wsURL   string
 }
 
 // DialEvents connects to the events WebSocket with optional filtering.
 func DialEvents(baseURL string, filter ...EventFilter) (*EventConn, error) {
+	wsURL := buildEventsWSURL(baseURL, filter...)
+	conn, err := dialEventsWS(wsURL)
+	if err != nil {
+		return nil, fmt.Errorf("cannot connect to gateway events at %s — is the gateway running?", baseURL)
+	}
+
+	c := &EventConn{
+		conn:    conn,
+		msgs:    make(chan EventMessage, 64),
+		done:    make(chan struct{}),
+		baseURL: baseURL,
+		wsURL:   wsURL,
+	}
+	go c.readLoop()
+	return c, nil
+}
+
+func buildEventsWSURL(baseURL string, filter ...EventFilter) string {
 	wsURL := httpToWS(baseURL) + "/api/v1/events/ws"
 	if len(filter) > 0 {
 		f := filter[0]
@@ -193,21 +216,15 @@ func DialEvents(baseURL string, filter ...EventFilter) (*EventConn, error) {
 			wsURL += "?" + params.Encode()
 		}
 	}
+	return wsURL
+}
+
+func dialEventsWS(wsURL string) (*websocket.Conn, error) {
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 10 * time.Second,
 	}
 	conn, _, err := dialer.Dial(wsURL, http.Header{})
-	if err != nil {
-		return nil, fmt.Errorf("cannot connect to gateway events at %s — is the gateway running?", baseURL)
-	}
-
-	c := &EventConn{
-		conn: conn,
-		msgs: make(chan EventMessage, 64),
-		done: make(chan struct{}),
-	}
-	go c.readLoop()
-	return c, nil
+	return conn, err
 }
 
 // Messages returns the channel that delivers incoming events.
@@ -232,6 +249,16 @@ func (c *EventConn) readLoop() {
 	for {
 		_, data, err := c.conn.ReadMessage()
 		if err != nil {
+			c.mu.Lock()
+			closed := c.closed
+			c.mu.Unlock()
+			if closed {
+				return
+			}
+			// Try to reconnect.
+			if c.reconnect() {
+				continue
+			}
 			return
 		}
 		var msg EventMessage
@@ -244,6 +271,47 @@ func (c *EventConn) readLoop() {
 			return
 		}
 	}
+}
+
+func (c *EventConn) reconnect() bool {
+	backoff := time.Second
+	maxBackoff := 30 * time.Second
+	attempts := 5
+
+	// Signal disconnection to the TUI.
+	select {
+	case c.msgs <- EventMessage{Type: "disconnected"}:
+	default:
+	}
+
+	for i := range attempts {
+		select {
+		case <-c.done:
+			return false
+		case <-time.After(backoff):
+		}
+
+		conn, err := dialEventsWS(c.wsURL)
+		if err == nil {
+			c.writeMu.Lock()
+			c.conn = conn
+			c.writeMu.Unlock()
+			// Signal reconnection.
+			select {
+			case c.msgs <- EventMessage{Type: "reconnected"}:
+			default:
+			}
+			return true
+		}
+
+		if i < attempts-1 {
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
+	}
+	return false
 }
 
 func httpToWS(baseURL string) string {

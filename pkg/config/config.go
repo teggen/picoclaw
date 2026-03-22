@@ -88,8 +88,28 @@ type Config struct {
 	Heartbeat HeartbeatConfig `json:"heartbeat"`
 	Devices   DevicesConfig   `json:"devices"`
 	Voice     VoiceConfig     `json:"voice"`
+	Logging   LoggingConfig   `json:"logging"`
 	// BuildInfo contains build-time version information
 	BuildInfo BuildInfo `json:"build_info,omitempty"`
+}
+
+// LoggingConfig controls logging behavior for console and file outputs.
+type LoggingConfig struct {
+	Level       string           `json:"level"    env:"PICOCLAW_LOGGING_LEVEL"`
+	FileLogging FileLogConfig    `json:"file"     env:"PICOCLAW_LOGGING_FILE"`
+	Console     ConsoleLogConfig `json:"console"  env:"PICOCLAW_LOGGING_CONSOLE"`
+}
+
+// FileLogConfig controls file-based logging.
+type FileLogConfig struct {
+	Enabled bool   `json:"enabled" env:"PICOCLAW_LOGGING_FILE_ENABLED"`
+	Path    string `json:"path"    env:"PICOCLAW_LOGGING_FILE_PATH"`
+	Level   string `json:"level"   env:"PICOCLAW_LOGGING_FILE_LEVEL"`
+}
+
+// ConsoleLogConfig controls console logging.
+type ConsoleLogConfig struct {
+	Level string `json:"level" env:"PICOCLAW_LOGGING_CONSOLE_LEVEL"`
 }
 
 // BuildInfo contains build-time version information

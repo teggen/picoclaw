@@ -179,6 +179,25 @@ func (c *Client) PatchConfig(patch json.RawMessage) error {
 	return c.sendJSON(http.MethodPatch, "/api/v1/config", patch)
 }
 
+// GetMetricsRaw fetches the raw Prometheus text from /metrics.
+func (c *Client) GetMetricsRaw() ([]byte, error) {
+	resp, err := c.HTTPClient.Get(c.BaseURL + "/metrics")
+	if err != nil {
+		return nil, fmt.Errorf("cannot connect to gateway at %s — is the gateway running?", c.BaseURL)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, c.parseHTTPErrorFromBody(resp.StatusCode, body)
+	}
+	return body, nil
+}
+
 func (c *Client) get(path string) (json.RawMessage, error) {
 	resp, err := c.HTTPClient.Get(c.BaseURL + path)
 	if err != nil {

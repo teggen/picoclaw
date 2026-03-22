@@ -75,16 +75,17 @@ type eventRecord struct {
 }
 
 type eventsModel struct {
-	viewport    viewport.Model
-	spinner     spinner.Model
-	conn        *client.EventConn
-	events      []eventRecord
-	cursor      int          // -1 = tail-follow mode, >= 0 = selection mode
-	showDetails bool         // global toggle for expanded details
-	expanded    map[int]bool // per-event expansion tracking
-	width       int
-	height      int
-	quitting    bool
+	viewport     viewport.Model
+	spinner      spinner.Model
+	conn         *client.EventConn
+	events       []eventRecord
+	cursor       int          // -1 = tail-follow mode, >= 0 = selection mode
+	showDetails  bool         // global toggle for expanded details
+	expanded     map[int]bool // per-event expansion tracking
+	width        int
+	height       int
+	quitting     bool
+	disconnected bool // true while connection is lost and reconnecting
 }
 
 func newEventsModel(conn *client.EventConn) eventsModel {
@@ -162,11 +163,18 @@ func (m eventsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case eventReceivedMsg:
 		event := client.EventMessage(msg)
-		line := formatEvent(event)
-		m.events = append(m.events, eventRecord{msg: event, compact: line})
-		m.updateContent()
-		if m.cursor == -1 {
-			m.viewport.GotoBottom()
+		switch event.Type {
+		case "disconnected":
+			m.disconnected = true
+		case "reconnected":
+			m.disconnected = false
+		default:
+			line := formatEvent(event)
+			m.events = append(m.events, eventRecord{msg: event, compact: line})
+			m.updateContent()
+			if m.cursor == -1 {
+				m.viewport.GotoBottom()
+			}
 		}
 		cmds = append(cmds, waitForEvent(m.conn))
 
@@ -191,7 +199,12 @@ func (m eventsModel) View() tea.View {
 	header := styles.TitleStyle.Render("PicoClaw Events") + "\n"
 	separator := styles.MutedStyle.Render(strings.Repeat("─", m.width))
 
-	watchLine := styles.MutedStyle.Render("  Watching for events... ") + m.spinner.View()
+	var watchLine string
+	if m.disconnected {
+		watchLine = styles.ErrorStyle.Render("  Connection lost, reconnecting... ") + m.spinner.View()
+	} else {
+		watchLine = styles.MutedStyle.Render("  Watching for events... ") + m.spinner.View()
+	}
 	helpBar := styles.MutedStyle.Render("  q: quit  ↑↓: select  enter: expand  d: toggle details  esc: deselect")
 
 	box := lipgloss.NewStyle().

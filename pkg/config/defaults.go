@@ -565,6 +565,17 @@ func DefaultConfig() *Config {
 		Voice: VoiceConfig{
 			EchoTranscription: false,
 		},
+		Logging: LoggingConfig{
+			Level: "info",
+			FileLogging: FileLogConfig{
+				Enabled: false,
+				Path:    "/var/log/picoclaw.log",
+				Level:   "",
+			},
+			Console: ConsoleLogConfig{
+				Level: "",
+			},
+		},
 		BuildInfo: BuildInfo{
 			Version:   Version,
 			GitCommit: GitCommit,
