@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); FILE=$(echo \"$INPUT\" | jq -r '.tool_input.file_path // \"\"' 2>/dev/null); if echo \"$FILE\" | grep -qE '\\.go$'; then make fmt 2>/dev/null; fi"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); FILE=$(echo \"$INPUT\" | jq -r '.tool_input.file_path // \"\"' 2>/dev/null); if echo \"$FILE\" | grep -qE '\\.(env|key|pem|secret)$'; then echo 'BLOCK: Refusing to edit sensitive file' >&2; exit 2; fi"
+          }
+        ]
+      }
+    ]
+  }
+}
