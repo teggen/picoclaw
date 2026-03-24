@@ -140,8 +140,6 @@ func (t *ConfigViewTool) channels() string {
 		{"line", ch.LINE.Enabled},
 		{"onebot", ch.OneBot.Enabled},
 		{"wecom", ch.WeCom.Enabled},
-		{"wecom_app", ch.WeComApp.Enabled},
-		{"wecom_aibot", ch.WeComAIBot.Enabled},
 		{"pico", ch.Pico.Enabled},
 		{"irc", ch.IRC.Enabled},
 	}
@@ -241,7 +239,7 @@ func (t *ConfigViewTool) countEnabledChannels() int {
 		ch.Discord.Enabled, ch.QQ.Enabled,
 		ch.DingTalk.Enabled, ch.Slack.Enabled, ch.Matrix.Enabled,
 		ch.LINE.Enabled, ch.OneBot.Enabled, ch.WeCom.Enabled,
-		ch.WeComApp.Enabled, ch.WeComAIBot.Enabled, ch.Pico.Enabled,
+		ch.Pico.Enabled,
 		ch.IRC.Enabled,
 	} {
 		if enabled {

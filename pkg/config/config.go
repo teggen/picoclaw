@@ -90,12 +90,12 @@ type Config struct {
 	Channels  ChannelsConfig  `json:"channels"`
 	ModelList []*ModelConfig  `json:"model_list"` // New model-centric provider configuration
 	Gateway   GatewayConfig   `json:"gateway"`
+	Logging   LoggingConfig   `json:"logging"`
 	Hooks     HooksConfig     `json:"hooks,omitempty"`
 	Tools     ToolsConfig     `json:"tools"`
 	Heartbeat HeartbeatConfig `json:"heartbeat"`
 	Devices   DevicesConfig   `json:"devices"`
 	Voice     VoiceConfig     `json:"voice"`
-	Logging   LoggingConfig   `json:"logging"`
 	// BuildInfo contains build-time version information
 	BuildInfo BuildInfo `json:"build_info,omitempty"`
 
@@ -133,25 +133,6 @@ func (c *Config) FilterSensitiveData(content string) string {
 		return content
 	}
 	return c.security.SensitiveDataReplacer().Replace(content)
-}
-
-// LoggingConfig controls logging behavior for console and file outputs.
-type LoggingConfig struct {
-	Level       string           `json:"level"   env:"PICOCLAW_LOGGING_LEVEL"`
-	FileLogging FileLogConfig    `json:"file"    env:"PICOCLAW_LOGGING_FILE"`
-	Console     ConsoleLogConfig `json:"console" env:"PICOCLAW_LOGGING_CONSOLE"`
-}
-
-// FileLogConfig controls file-based logging.
-type FileLogConfig struct {
-	Enabled bool   `json:"enabled" env:"PICOCLAW_LOGGING_FILE_ENABLED"`
-	Path    string `json:"path"    env:"PICOCLAW_LOGGING_FILE_PATH"`
-	Level   string `json:"level"   env:"PICOCLAW_LOGGING_FILE_LEVEL"`
-}
-
-// ConsoleLogConfig controls console logging.
-type ConsoleLogConfig struct {
-	Level string `json:"level" env:"PICOCLAW_LOGGING_CONSOLE_LEVEL"`
 }
 
 type HooksConfig struct {
@@ -341,10 +322,7 @@ type AgentDefaults struct {
 	ToolFeedback              ToolFeedbackConfig `json:"tool_feedback,omitempty"`
 }
 
-const (
-	DefaultMaxMediaSize                = 20 * 1024 * 1024 // 20 MB
-	DefaultWeComAIBotProcessingMessage = "⏳ Processing, please wait. The results will be sent shortly."
-)
+const DefaultMaxMediaSize = 20 * 1024 * 1024 // 20 MB
 
 func (d *AgentDefaults) GetMaxMediaSize() int {
 	if d.MaxMediaSize > 0 {
@@ -383,14 +361,21 @@ type ChannelsConfig struct {
 	Matrix     MatrixConfig     `json:"matrix"`
 	LINE       LINEConfig       `json:"line"`
 	OneBot     OneBotConfig     `json:"onebot"`
-	WeCom      WeComConfig      `json:"wecom"`
-	WeComApp   WeComAppConfig   `json:"wecom_app"`
-	WeComAIBot WeComAIBotConfig `json:"wecom_aibot"`
+	WeCom      WeComConfig      `json:"wecom"       envPrefix:"PICOCLAW_CHANNELS_WECOM_"`
 	Weixin     WeixinConfig     `json:"weixin"`
 	Pico       PicoConfig       `json:"pico"`
 	PicoClient PicoClientConfig `json:"pico_client"`
 	IRC        IRCConfig        `json:"irc"`
 	API        APIConfig        `json:"api"`
+}
+
+type APIConfig struct {
+	Enabled        bool                `json:"enabled"                   env:"PICOCLAW_CHANNELS_API_ENABLED"`
+	AllowOrigins   []string            `json:"allow_origins,omitempty"`
+	PingInterval   int                 `json:"ping_interval,omitempty"`
+	ReadTimeout    int                 `json:"read_timeout,omitempty"`
+	MaxConnections int                 `json:"max_connections,omitempty"`
+	AllowFrom      FlexibleStringSlice `json:"allow_from"                env:"PICOCLAW_CHANNELS_API_ALLOW_FROM"`
 }
 
 // GroupTriggerConfig controls when the bot responds in group chats.
@@ -406,7 +391,7 @@ type TypingConfig struct {
 
 // PlaceholderConfig controls placeholder message behavior (Phase 10).
 type PlaceholderConfig struct {
-	Enabled bool   `json:"enabled,omitempty"`
+	Enabled bool   `json:"enabled"`
 	Text    string `json:"text,omitempty"`
 }
 
@@ -603,18 +588,20 @@ func (c *SlackConfig) SetAppToken(token string) {
 }
 
 type MatrixConfig struct {
-	Enabled            bool   `json:"enabled"                  env:"PICOCLAW_CHANNELS_MATRIX_ENABLED"`
-	Homeserver         string `json:"homeserver"               env:"PICOCLAW_CHANNELS_MATRIX_HOMESERVER"`
-	UserID             string `json:"user_id"                  env:"PICOCLAW_CHANNELS_MATRIX_USER_ID"`
+	Enabled            bool   `json:"enabled"                        env:"PICOCLAW_CHANNELS_MATRIX_ENABLED"`
+	Homeserver         string `json:"homeserver"                     env:"PICOCLAW_CHANNELS_MATRIX_HOMESERVER"`
+	UserID             string `json:"user_id"                        env:"PICOCLAW_CHANNELS_MATRIX_USER_ID"`
 	accessToken        string
-	DeviceID           string              `json:"device_id,omitempty"      env:"PICOCLAW_CHANNELS_MATRIX_DEVICE_ID"`
-	JoinOnInvite       bool                `json:"join_on_invite"           env:"PICOCLAW_CHANNELS_MATRIX_JOIN_ON_INVITE"`
-	MessageFormat      string              `json:"message_format,omitempty" env:"PICOCLAW_CHANNELS_MATRIX_MESSAGE_FORMAT"`
-	AllowFrom          FlexibleStringSlice `json:"allow_from"               env:"PICOCLAW_CHANNELS_MATRIX_ALLOW_FROM"`
+	DeviceID           string              `json:"device_id,omitempty"            env:"PICOCLAW_CHANNELS_MATRIX_DEVICE_ID"`
+	JoinOnInvite       bool                `json:"join_on_invite"                 env:"PICOCLAW_CHANNELS_MATRIX_JOIN_ON_INVITE"`
+	MessageFormat      string              `json:"message_format,omitempty"       env:"PICOCLAW_CHANNELS_MATRIX_MESSAGE_FORMAT"`
+	AllowFrom          FlexibleStringSlice `json:"allow_from"                     env:"PICOCLAW_CHANNELS_MATRIX_ALLOW_FROM"`
 	GroupTrigger       GroupTriggerConfig  `json:"group_trigger,omitempty"`
 	Placeholder        PlaceholderConfig   `json:"placeholder,omitempty"`
-	ReasoningChannelID string              `json:"reasoning_channel_id"     env:"PICOCLAW_CHANNELS_MATRIX_REASONING_CHANNEL_ID"`
+	ReasoningChannelID string              `json:"reasoning_channel_id"           env:"PICOCLAW_CHANNELS_MATRIX_REASONING_CHANNEL_ID"`
 	secDirty           bool
+	CryptoDatabasePath string `json:"crypto_database_path,omitempty" env:"PICOCLAW_CHANNELS_MATRIX_CRYPTO_DATABASE_PATH"`
+	CryptoPassphrase   string `json:"crypto_passphrase,omitempty"    env:"PICOCLAW_CHANNELS_MATRIX_CRYPTO_PASSPHRASE"`
 }
 
 // AccessToken returns the Matrix access token
@@ -690,136 +677,28 @@ func (c *OneBotConfig) SetAccessToken(token string) {
 	c.secDirty = true
 }
 
+type WeComGroupConfig struct {
+	AllowFrom FlexibleStringSlice `json:"allow_from,omitempty"`
+}
+
 type WeComConfig struct {
-	Enabled            bool `json:"enabled"                 env:"PICOCLAW_CHANNELS_WECOM_ENABLED"`
-	token              string
-	encodingAESKey     string
-	WebhookURL         string              `json:"webhook_url"             env:"PICOCLAW_CHANNELS_WECOM_WEBHOOK_URL"`
-	WebhookHost        string              `json:"webhook_host"            env:"PICOCLAW_CHANNELS_WECOM_WEBHOOK_HOST"`
-	WebhookPort        int                 `json:"webhook_port"            env:"PICOCLAW_CHANNELS_WECOM_WEBHOOK_PORT"`
-	WebhookPath        string              `json:"webhook_path"            env:"PICOCLAW_CHANNELS_WECOM_WEBHOOK_PATH"`
-	AllowFrom          FlexibleStringSlice `json:"allow_from"              env:"PICOCLAW_CHANNELS_WECOM_ALLOW_FROM"`
-	ReplyTimeout       int                 `json:"reply_timeout"           env:"PICOCLAW_CHANNELS_WECOM_REPLY_TIMEOUT"`
-	GroupTrigger       GroupTriggerConfig  `json:"group_trigger,omitempty"`
-	ReasoningChannelID string              `json:"reasoning_channel_id"    env:"PICOCLAW_CHANNELS_WECOM_REASONING_CHANNEL_ID"`
-	secDirty           bool
+	Enabled             bool   `json:"enabled"                 env:"ENABLED"`
+	BotID               string `json:"bot_id"                  env:"BOT_ID"`
+	secret              string
+	WebSocketURL        string              `json:"websocket_url,omitempty" env:"WEBSOCKET_URL"`
+	SendThinkingMessage bool                `json:"send_thinking_message"   env:"SEND_THINKING_MESSAGE"`
+	AllowFrom           FlexibleStringSlice `json:"allow_from"              env:"ALLOW_FROM"`
+	ReasoningChannelID  string              `json:"reasoning_channel_id"    env:"REASONING_CHANNEL_ID"`
+	secDirty            bool
 }
 
-// Token returns the WeCom token
-func (c *WeComConfig) Token() string {
-	return c.token
-}
-
-// SetToken sets the WeCom token
-func (c *WeComConfig) SetToken(token string) {
-	c.token = token
-	c.secDirty = true
-}
-
-// EncodingAESKey returns the WeCom encoding AES key
-func (c *WeComConfig) EncodingAESKey() string {
-	return c.encodingAESKey
-}
-
-// SetEncodingAESKey sets the WeCom encoding AES key
-func (c *WeComConfig) SetEncodingAESKey(key string) {
-	c.encodingAESKey = key
-	c.secDirty = true
-}
-
-type WeComAppConfig struct {
-	Enabled            bool   `json:"enabled"                 env:"PICOCLAW_CHANNELS_WECOM_APP_ENABLED"`
-	CorpID             string `json:"corp_id"                 env:"PICOCLAW_CHANNELS_WECOM_APP_CORP_ID"`
-	corpSecret         string
-	AgentID            int64 `json:"agent_id"                env:"PICOCLAW_CHANNELS_WECOM_APP_AGENT_ID"`
-	token              string
-	encodingAESKey     string
-	WebhookHost        string              `json:"webhook_host"            env:"PICOCLAW_CHANNELS_WECOM_APP_WEBHOOK_HOST"`
-	WebhookPort        int                 `json:"webhook_port"            env:"PICOCLAW_CHANNELS_WECOM_APP_WEBHOOK_PORT"`
-	WebhookPath        string              `json:"webhook_path"            env:"PICOCLAW_CHANNELS_WECOM_APP_WEBHOOK_PATH"`
-	AllowFrom          FlexibleStringSlice `json:"allow_from"              env:"PICOCLAW_CHANNELS_WECOM_APP_ALLOW_FROM"`
-	ReplyTimeout       int                 `json:"reply_timeout"           env:"PICOCLAW_CHANNELS_WECOM_APP_REPLY_TIMEOUT"`
-	GroupTrigger       GroupTriggerConfig  `json:"group_trigger,omitempty"`
-	ReasoningChannelID string              `json:"reasoning_channel_id"    env:"PICOCLAW_CHANNELS_WECOM_APP_REASONING_CHANNEL_ID"`
-	secDirty           bool
-}
-
-// CorpSecret returns the corporate secret for WeCom app
-func (c *WeComAppConfig) CorpSecret() string {
-	return c.corpSecret
-}
-
-// SetCorpSecret sets the corporate secret for WeCom app
-func (c *WeComAppConfig) SetCorpSecret(secret string) {
-	c.corpSecret = secret
-	c.secDirty = true
-}
-
-// Token returns the webhook token for WeCom app
-func (c *WeComAppConfig) Token() string {
-	return c.token
-}
-
-// SetToken sets the webhook token for WeCom app
-func (c *WeComAppConfig) SetToken(token string) {
-	c.token = token
-	c.secDirty = true
-}
-
-// EncodingAESKey returns the encoding AES key for WeCom app
-func (c *WeComAppConfig) EncodingAESKey() string {
-	return c.encodingAESKey
-}
-
-// SetEncodingAESKey sets the encoding AES key for WeCom app
-func (c *WeComAppConfig) SetEncodingAESKey(key string) {
-	c.encodingAESKey = key
-	c.secDirty = true
-}
-
-type WeComAIBotConfig struct {
-	Enabled            bool   `json:"enabled"                      env:"PICOCLAW_CHANNELS_WECOM_AIBOT_ENABLED"`
-	BotID              string `json:"bot_id,omitempty"             env:"PICOCLAW_CHANNELS_WECOM_AIBOT_BOT_ID"`
-	secret             string
-	token              string
-	encodingAESKey     string
-	WebhookPath        string              `json:"webhook_path,omitempty"       env:"PICOCLAW_CHANNELS_WECOM_AIBOT_WEBHOOK_PATH"`
-	AllowFrom          FlexibleStringSlice `json:"allow_from"                   env:"PICOCLAW_CHANNELS_WECOM_AIBOT_ALLOW_FROM"`
-	ReplyTimeout       int                 `json:"reply_timeout"                env:"PICOCLAW_CHANNELS_WECOM_AIBOT_REPLY_TIMEOUT"`
-	MaxSteps           int                 `json:"max_steps"                    env:"PICOCLAW_CHANNELS_WECOM_AIBOT_MAX_STEPS"`       // Maximum streaming steps
-	WelcomeMessage     string              `json:"welcome_message"              env:"PICOCLAW_CHANNELS_WECOM_AIBOT_WELCOME_MESSAGE"` // Sent on enter_chat event; empty = no welcome
-	ProcessingMessage  string              `json:"processing_message,omitempty" env:"PICOCLAW_CHANNELS_WECOM_AIBOT_PROCESSING_MESSAGE"`
-	ReasoningChannelID string              `json:"reasoning_channel_id"         env:"PICOCLAW_CHANNELS_WECOM_AIBOT_REASONING_CHANNEL_ID"`
-	secDirty           bool
-}
-
-// Token returns the webhook token for WeCom AI bot
-func (c *WeComAIBotConfig) Token() string {
-	return c.token
-}
-
-// EncodingAESKey returns the encoding AES key for WeCom AI bot
-func (c *WeComAIBotConfig) EncodingAESKey() string {
-	return c.encodingAESKey
-}
-
-// SetToken sets the token for WeCom AI bot
-func (c *WeComAIBotConfig) SetToken(token string) {
-	c.token = token
-	c.secDirty = true
-}
-
-// SetEncodingAESKey sets the encoding AES key for WeCom AI bot
-func (c *WeComAIBotConfig) SetEncodingAESKey(key string) {
-	c.encodingAESKey = key
-	c.secDirty = true
-}
-
-func (c *WeComAIBotConfig) Secret() string {
+// Secret returns the WeCom bot secret.
+func (c *WeComConfig) Secret() string {
 	return c.secret
 }
 
-func (c *WeComAIBotConfig) SetSecret(secret string) {
+// SetSecret sets the WeCom bot secret.
+func (c *WeComConfig) SetSecret(secret string) {
 	c.secret = secret
 	c.secDirty = true
 }
@@ -869,15 +748,6 @@ func (c *PicoConfig) Token() string {
 func (c *PicoConfig) SetToken(token string) {
 	c.token = token
 	c.secDirty = true
-}
-
-type APIConfig struct {
-	Enabled        bool                `json:"enabled"                   env:"PICOCLAW_CHANNELS_API_ENABLED"`
-	AllowOrigins   []string            `json:"allow_origins,omitempty"`
-	PingInterval   int                 `json:"ping_interval,omitempty"`
-	ReadTimeout    int                 `json:"read_timeout,omitempty"`
-	MaxConnections int                 `json:"max_connections,omitempty"`
-	AllowFrom      FlexibleStringSlice `json:"allow_from"                env:"PICOCLAW_CHANNELS_API_ALLOW_FROM"`
 }
 
 type PicoClientConfig struct {
@@ -989,6 +859,10 @@ type ModelConfig struct {
 	secModelName string
 	apiKeys      []string
 	secDirty     bool
+
+	// isVirtual marks this model as a virtual model generated from multi-key expansion.
+	// Virtual models should not be persisted to config files.
+	isVirtual bool
 }
 
 // APIKey returns the first API key from apiKeys
@@ -997,6 +871,11 @@ func (c *ModelConfig) APIKey() string {
 		return c.apiKeys[0]
 	}
 	return ""
+}
+
+// IsVirtual returns true if this model was generated from multi-key expansion.
+func (c *ModelConfig) IsVirtual() bool {
+	return c.isVirtual
 }
 
 // Validate checks if the ModelConfig has all required fields.
@@ -1024,7 +903,22 @@ type GatewayConfig struct {
 	Port           int    `json:"port"            env:"PICOCLAW_GATEWAY_PORT"`
 	HotReload      bool   `json:"hot_reload"      env:"PICOCLAW_GATEWAY_HOT_RELOAD"`
 	MetricsEnabled bool   `json:"metrics_enabled" env:"PICOCLAW_GATEWAY_METRICS_ENABLED"`
-	LogLevel       string `json:"log_level,omitempty" env:"PICOCLAW_LOG_LEVEL"`
+}
+
+type LoggingConfig struct {
+	Level       string           `json:"level"`
+	FileLogging FileLogConfig    `json:"file_logging"`
+	Console     ConsoleLogConfig `json:"console"`
+}
+
+type FileLogConfig struct {
+	Enabled bool   `json:"enabled"`
+	Path    string `json:"path"`
+	Level   string `json:"level"`
+}
+
+type ConsoleLogConfig struct {
+	Level string `json:"level"`
 }
 
 type ToolDiscoveryConfig struct {
@@ -1269,30 +1163,28 @@ type ToolsConfig struct {
 	// FilterMinLength is the minimum content length required for filtering.
 	// Content shorter than this will be returned unchanged for performance.
 	// Default: 8
-	FilterMinLength  int                `json:"filter_min_length" env:"PICOCLAW_TOOLS_FILTER_MIN_LENGTH"`
-	Web              WebToolsConfig     `json:"web"`
-	Cron             CronToolsConfig    `json:"cron"`
-	Exec             ExecConfig         `json:"exec"`
-	Skills           SkillsToolsConfig  `json:"skills"`
-	MediaCleanup     MediaCleanupConfig `json:"media_cleanup"`
-	MCP              MCPConfig          `json:"mcp"`
-	AppendFile       ToolConfig         `json:"append_file"                                               envPrefix:"PICOCLAW_TOOLS_APPEND_FILE_"`
-	EditFile         ToolConfig         `json:"edit_file"                                                 envPrefix:"PICOCLAW_TOOLS_EDIT_FILE_"`
-	FindSkills       ToolConfig         `json:"find_skills"                                               envPrefix:"PICOCLAW_TOOLS_FIND_SKILLS_"`
-	InstallSkill     ToolConfig         `json:"install_skill"                                             envPrefix:"PICOCLAW_TOOLS_INSTALL_SKILL_"`
-	ListDir          ToolConfig         `json:"list_dir"                                                  envPrefix:"PICOCLAW_TOOLS_LIST_DIR_"`
-	Message          ToolConfig         `json:"message"                                                   envPrefix:"PICOCLAW_TOOLS_MESSAGE_"`
-	ReadFile         ReadFileToolConfig `json:"read_file"                                                 envPrefix:"PICOCLAW_TOOLS_READ_FILE_"`
-	SendFile         ToolConfig         `json:"send_file"                                                 envPrefix:"PICOCLAW_TOOLS_SEND_FILE_"`
-	Spawn            ToolConfig         `json:"spawn"                                                     envPrefix:"PICOCLAW_TOOLS_SPAWN_"`
-	SpawnStatus      ToolConfig         `json:"spawn_status"                                              envPrefix:"PICOCLAW_TOOLS_SPAWN_STATUS_"`
-	Subagent         ToolConfig         `json:"subagent"                                                  envPrefix:"PICOCLAW_TOOLS_SUBAGENT_"`
-	WebFetch         ToolConfig         `json:"web_fetch"                                                 envPrefix:"PICOCLAW_TOOLS_WEB_FETCH_"`
-	WebFetchMarkdown ToolConfig         `json:"web_fetch_markdown"                                        envPrefix:"PICOCLAW_TOOLS_WEB_FETCH_MARKDOWN_"`
-	WriteFile        ToolConfig         `json:"write_file"                                                envPrefix:"PICOCLAW_TOOLS_WRITE_FILE_"`
-	CodingAgent      CodingAgentConfig  `json:"coding_agent"`
-	ConfigView       ToolConfig         `json:"config_view"                                               envPrefix:"PICOCLAW_TOOLS_CONFIG_VIEW_"`
-	Metrics          ToolConfig         `json:"metrics"                                                   envPrefix:"PICOCLAW_TOOLS_METRICS_"`
+	FilterMinLength int                `json:"filter_min_length" env:"PICOCLAW_TOOLS_FILTER_MIN_LENGTH"`
+	Web             WebToolsConfig     `json:"web"`
+	Cron            CronToolsConfig    `json:"cron"`
+	Exec            ExecConfig         `json:"exec"`
+	Skills          SkillsToolsConfig  `json:"skills"`
+	MediaCleanup    MediaCleanupConfig `json:"media_cleanup"`
+	MCP             MCPConfig          `json:"mcp"`
+	AppendFile      ToolConfig         `json:"append_file"                                              envPrefix:"PICOCLAW_TOOLS_APPEND_FILE_"`
+	EditFile        ToolConfig         `json:"edit_file"                                                envPrefix:"PICOCLAW_TOOLS_EDIT_FILE_"`
+	CodingAgent     CodingAgentConfig  `json:"coding_agent"`
+	FindSkills      ToolConfig         `json:"find_skills"                                              envPrefix:"PICOCLAW_TOOLS_FIND_SKILLS_"`
+	InstallSkill    ToolConfig         `json:"install_skill"                                            envPrefix:"PICOCLAW_TOOLS_INSTALL_SKILL_"`
+	ListDir         ToolConfig         `json:"list_dir"                                                 envPrefix:"PICOCLAW_TOOLS_LIST_DIR_"`
+	Message         ToolConfig         `json:"message"                                                  envPrefix:"PICOCLAW_TOOLS_MESSAGE_"`
+	ReadFile        ReadFileToolConfig `json:"read_file"                                                envPrefix:"PICOCLAW_TOOLS_READ_FILE_"`
+	SendFile        ToolConfig         `json:"send_file"                                                envPrefix:"PICOCLAW_TOOLS_SEND_FILE_"`
+	Spawn           ToolConfig         `json:"spawn"                                                    envPrefix:"PICOCLAW_TOOLS_SPAWN_"`
+	SpawnStatus     ToolConfig         `json:"spawn_status"                                             envPrefix:"PICOCLAW_TOOLS_SPAWN_STATUS_"`
+	Subagent        ToolConfig         `json:"subagent"                                                 envPrefix:"PICOCLAW_TOOLS_SUBAGENT_"`
+	WebFetch         ToolConfig         `json:"web_fetch"                                                envPrefix:"PICOCLAW_TOOLS_WEB_FETCH_"`
+	WebFetchMarkdown ToolConfig        `json:"web_fetch_markdown"                                       envPrefix:"PICOCLAW_TOOLS_WEB_FETCH_MARKDOWN_"`
+	WriteFile        ToolConfig        `json:"write_file"                                               envPrefix:"PICOCLAW_TOOLS_WRITE_FILE_"`
 }
 
 // IsFilterSensitiveDataEnabled returns true if sensitive data filtering is enabled
@@ -1662,39 +1554,10 @@ func applySecurityConfig(cfg *Config, sec *SecurityConfig) error {
 			cfg.Channels.OneBot.accessToken = sec.Channels.OneBot.AccessToken
 		}
 
-		// Handle WeCom token and encoding key
+		// Handle WeCom bot secret
 		if sec.Channels.WeCom != nil {
-			if sec.Channels.WeCom.Token != "" {
-				cfg.Channels.WeCom.token = sec.Channels.WeCom.Token
-			}
-			if sec.Channels.WeCom.EncodingAESKey != "" {
-				cfg.Channels.WeCom.encodingAESKey = sec.Channels.WeCom.EncodingAESKey
-			}
-		}
-
-		// Handle WeCom App credentials
-		if sec.Channels.WeComApp != nil {
-			if sec.Channels.WeComApp.CorpSecret != "" {
-				cfg.Channels.WeComApp.corpSecret = sec.Channels.WeComApp.CorpSecret
-			}
-			if sec.Channels.WeComApp.Token != "" {
-				cfg.Channels.WeComApp.token = sec.Channels.WeComApp.Token
-			}
-			if sec.Channels.WeComApp.EncodingAESKey != "" {
-				cfg.Channels.WeComApp.encodingAESKey = sec.Channels.WeComApp.EncodingAESKey
-			}
-		}
-
-		// Handle WeCom AI Bot credentials
-		if sec.Channels.WeComAIBot != nil {
-			if sec.Channels.WeComAIBot.Token != "" {
-				cfg.Channels.WeComAIBot.token = sec.Channels.WeComAIBot.Token
-			}
-			if sec.Channels.WeComAIBot.EncodingAESKey != "" {
-				cfg.Channels.WeComAIBot.encodingAESKey = sec.Channels.WeComAIBot.EncodingAESKey
-			}
-			if sec.Channels.WeComAIBot.Secret != "" {
-				cfg.Channels.WeComAIBot.secret = sec.Channels.WeComAIBot.Secret
+			if sec.Channels.WeCom.Secret != "" {
+				cfg.Channels.WeCom.secret = sec.Channels.WeCom.Secret
 			}
 		}
 
@@ -1918,26 +1781,9 @@ func SaveConfig(path string, cfg *Config) error {
 	}
 	if cfg.Channels.WeCom.secDirty {
 		cfg.security.Channels.WeCom = &WeComSecurity{
-			Token:          cfg.Channels.WeCom.Token(),
-			EncodingAESKey: cfg.Channels.WeCom.EncodingAESKey(),
+			Secret: cfg.Channels.WeCom.Secret(),
 		}
 		cfg.Channels.WeCom.secDirty = false
-	}
-	if cfg.Channels.WeComApp.secDirty {
-		cfg.security.Channels.WeComApp = &WeComAppSecurity{
-			CorpSecret:     cfg.Channels.WeComApp.CorpSecret(),
-			Token:          cfg.Channels.WeComApp.Token(),
-			EncodingAESKey: cfg.Channels.WeComApp.EncodingAESKey(),
-		}
-		cfg.Channels.WeComApp.secDirty = false
-	}
-	if cfg.Channels.WeComAIBot.secDirty {
-		cfg.security.Channels.WeComAIBot = &WeComAIBotSecurity{
-			Token:          cfg.Channels.WeComAIBot.Token(),
-			EncodingAESKey: cfg.Channels.WeComAIBot.EncodingAESKey(),
-			Secret:         cfg.Channels.WeComAIBot.Secret(),
-		}
-		cfg.Channels.WeComAIBot.secDirty = false
 	}
 	if cfg.Tools.Web.Brave.secDirty {
 		cfg.security.Web.Brave = &BraveSecurity{
@@ -1996,7 +1842,20 @@ func SaveConfig(path string, cfg *Config) error {
 		return err
 	}
 
+	// Filter out virtual models before serializing to config file
+	nonVirtualModels := make([]*ModelConfig, 0, len(cfg.ModelList))
+	for _, m := range cfg.ModelList {
+		if !m.isVirtual {
+			nonVirtualModels = append(nonVirtualModels, m)
+		}
+	}
+	// Temporarily replace ModelList with filtered version for serialization
+	originalModelList := cfg.ModelList
+	cfg.ModelList = nonVirtualModels
+
 	data, err := json.MarshalIndent(cfg, "", "  ")
+	// Restore original ModelList after serialization
+	cfg.ModelList = originalModelList
 	if err != nil {
 		return err
 	}
@@ -2214,6 +2073,7 @@ func expandMultiKeyModels(models []*ModelConfig) []*ModelConfig {
 				RequestTimeout: m.RequestTimeout,
 				ThinkingLevel:  m.ThinkingLevel,
 				ExtraBody:      m.ExtraBody,
+				isVirtual:      true,
 			}
 			expanded = append(expanded, additionalEntry)
 			fallbackNames = append(fallbackNames, expandedName)
@@ -2291,12 +2151,6 @@ func (t *ToolsConfig) IsToolEnabled(name string) bool {
 		return t.WriteFile.Enabled
 	case "mcp":
 		return t.MCP.Enabled
-	case "coding_agent":
-		return t.CodingAgent.Enabled
-	case "config_view":
-		return t.ConfigView.Enabled
-	case "metrics":
-		return t.Metrics.Enabled
 	default:
 		return true
 	}

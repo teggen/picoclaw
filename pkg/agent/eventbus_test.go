@@ -416,21 +416,19 @@ func TestAgentLoop_EmitsContextCompressEventOnRetry(t *testing.T) {
 		t.Fatalf("expected retry attempt 1, got %d", retryPayload.Attempt)
 	}
 
-	// Find the compress event with retry reason (there may be a prior proactive_budget one).
-	var foundRetryCompress bool
-	for _, evt := range events {
-		if evt.Kind == EventKindContextCompress {
-			if payload, ok := evt.Payload.(ContextCompressPayload); ok && payload.Reason == ContextCompressReasonRetry {
-				foundRetryCompress = true
-				if payload.DroppedMessages == 0 {
-					t.Fatal("expected dropped messages to be recorded")
-				}
-				break
-			}
-		}
+	compressEvt, ok := findEvent(events, EventKindContextCompress)
+	if !ok {
+		t.Fatal("expected context compress event")
 	}
-	if !foundRetryCompress {
-		t.Fatal("expected context compress event with retry reason")
+	payload, ok := compressEvt.Payload.(ContextCompressPayload)
+	if !ok {
+		t.Fatalf("expected ContextCompressPayload, got %T", compressEvt.Payload)
+	}
+	if payload.Reason != ContextCompressReasonRetry {
+		t.Fatalf("expected retry compress reason, got %q", payload.Reason)
+	}
+	if payload.DroppedMessages == 0 {
+		t.Fatal("expected dropped messages to be recorded")
 	}
 }
 

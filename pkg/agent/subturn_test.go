@@ -939,7 +939,7 @@ func TestGetActiveTurn(t *testing.T) {
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
 				ModelName: "gpt-4o-mini",
-				Provider: "mock",
+				Provider:  "mock",
 			},
 		},
 	}
@@ -997,7 +997,7 @@ func TestGetActiveTurn_WithChildren(t *testing.T) {
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
 				ModelName: "gpt-4o-mini",
-				Provider: "mock",
+				Provider:  "mock",
 			},
 		},
 	}
@@ -1078,7 +1078,7 @@ func TestInjectFollowUp(t *testing.T) {
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
 				ModelName: "gpt-4o-mini",
-				Provider: "mock",
+				Provider:  "mock",
 			},
 		},
 	}
@@ -1107,7 +1107,7 @@ func TestAPIAliases(t *testing.T) {
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
 				ModelName: "gpt-4o-mini",
-				Provider: "mock",
+				Provider:  "mock",
 			},
 		},
 	}
@@ -1146,7 +1146,7 @@ func TestInterruptHard_Alias(t *testing.T) {
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
 				ModelName: "gpt-4o-mini",
-				Provider: "mock",
+				Provider:  "mock",
 			},
 		},
 	}

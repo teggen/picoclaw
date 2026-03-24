@@ -149,11 +149,11 @@ func TestBuildWeixinSyncBufPathUsesPicoclawHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(config.EnvHome, home)
 
-	weixinCfg := config.WeixinConfig{
+	wxCfg := config.WeixinConfig{
 		BaseURL: "https://ilinkai.weixin.qq.com/",
 	}
-	weixinCfg.SetToken("token-123")
-	got := buildWeixinSyncBufPath(weixinCfg)
+	wxCfg.SetToken("token-123")
+	got := buildWeixinSyncBufPath(wxCfg)
 	if filepath.Dir(got) != filepath.Join(home, "channels", "weixin", "sync") {
 		t.Fatalf("sync path dir = %q", filepath.Dir(got))
 	}

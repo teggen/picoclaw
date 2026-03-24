@@ -470,7 +470,6 @@ func qqUploadFilename(part bus.MediaPart, resolved string, fileType uint64) stri
 	return ""
 }
 
-
 func (c *QQChannel) outboundMediaType(part bus.MediaPart, localPath string) string {
 	if part.Type != "audio" {
 		return part.Type

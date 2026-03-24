@@ -107,6 +107,8 @@ func DefaultConfig() *Config {
 					Enabled: true,
 					Text:    "Thinking... 💭",
 				},
+				CryptoDatabasePath: "",
+				CryptoPassphrase:   "",
 			},
 			LINE: LINEConfig{
 				Enabled:      false,
@@ -123,32 +125,11 @@ func DefaultConfig() *Config {
 				AllowFrom:         FlexibleStringSlice{},
 			},
 			WeCom: WeComConfig{
-				Enabled:      false,
-				WebhookURL:   "",
-				WebhookHost:  "0.0.0.0",
-				WebhookPort:  18793,
-				WebhookPath:  "/webhook/wecom",
-				AllowFrom:    FlexibleStringSlice{},
-				ReplyTimeout: 5,
-			},
-			WeComApp: WeComAppConfig{
-				Enabled:      false,
-				CorpID:       "",
-				AgentID:      0,
-				WebhookHost:  "0.0.0.0",
-				WebhookPort:  18792,
-				WebhookPath:  "/webhook/wecom-app",
-				AllowFrom:    FlexibleStringSlice{},
-				ReplyTimeout: 5,
-			},
-			WeComAIBot: WeComAIBotConfig{
-				Enabled:           false,
-				WebhookPath:       "/webhook/wecom-aibot",
-				AllowFrom:         FlexibleStringSlice{},
-				ReplyTimeout:      5,
-				MaxSteps:          10,
-				WelcomeMessage:    "Hello! I'm your AI assistant. How can I help you today?",
-				ProcessingMessage: DefaultWeComAIBotProcessingMessage,
+				Enabled:             false,
+				BotID:               "",
+				WebSocketURL:        "wss://openws.work.weixin.qq.com",
+				SendThinkingMessage: true,
+				AllowFrom:           FlexibleStringSlice{},
 			},
 			Weixin: WeixinConfig{
 				Enabled:    false,
@@ -366,11 +347,18 @@ func DefaultConfig() *Config {
 			},
 		},
 		Gateway: GatewayConfig{
-			Host:           "127.0.0.1",
-			Port:           18790,
-			HotReload:      false,
-			MetricsEnabled: true,
-			LogLevel:       "fatal",
+			Host:      "127.0.0.1",
+			Port:      18790,
+			HotReload: false,
+		},
+		Logging: LoggingConfig{
+			Level: "info",
+			FileLogging: FileLogConfig{
+				Enabled: false,
+			},
+			Console: ConsoleLogConfig{
+				Level: "info",
+			},
 		},
 		Tools: ToolsConfig{
 			FilterSensitiveData: true,
@@ -510,19 +498,6 @@ func DefaultConfig() *Config {
 			WriteFile: ToolConfig{
 				Enabled: true,
 			},
-			CodingAgent: CodingAgentConfig{
-				ToolConfig:        ToolConfig{Enabled: true},
-				Backend:           "claude_code",
-				Force:             true,
-				TimeoutSeconds:    600,
-				SessionContinuity: true,
-			},
-			ConfigView: ToolConfig{
-				Enabled: true,
-			},
-			Metrics: ToolConfig{
-				Enabled: true,
-			},
 		},
 		Heartbeat: HeartbeatConfig{
 			Enabled:  true,
@@ -535,17 +510,6 @@ func DefaultConfig() *Config {
 		Voice: VoiceConfig{
 			ModelName:         "",
 			EchoTranscription: false,
-		},
-		Logging: LoggingConfig{
-			Level: "info",
-			FileLogging: FileLogConfig{
-				Enabled: false,
-				Path:    "/var/log/picoclaw.log",
-				Level:   "",
-			},
-			Console: ConsoleLogConfig{
-				Level: "",
-			},
 		},
 		BuildInfo: BuildInfo{
 			Version:   Version,
