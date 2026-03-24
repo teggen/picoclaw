@@ -22,8 +22,7 @@ type ConsoleLogConfig struct {
 // which takes precedence over config values.
 func ApplyConfig(cfg LoggingConfig, debug bool) {
 	if debug {
-		SetLevel(DEBUG)
-		return
+		cfg.Level = "debug"
 	}
 
 	globalLevel := ParseLevel(cfg.Level)
@@ -50,12 +49,14 @@ func ApplyConfig(cfg LoggingConfig, debug bool) {
 	// Set independent output levels
 	SetConsoleLevel(consoleLevel)
 
-	// Enable file logging if configured
+	// Enable or disable file logging based on configuration
 	if cfg.FileLogging.Enabled {
 		if err := EnableFileLogging(cfg.FileLogging.Path); err != nil {
 			Errorf("Failed to enable file logging at %s: %v", cfg.FileLogging.Path, err)
 			return
 		}
 		SetFileLevel(fileLevel)
+	} else {
+		DisableFileLogging()
 	}
 }

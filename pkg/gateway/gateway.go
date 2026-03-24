@@ -193,6 +193,7 @@ func Run(debug bool, configPath string, allowEmptyStartup bool) error {
 				msgBus,
 				allowEmptyStartup,
 				configPath,
+				debug,
 			)
 			if err != nil {
 				logger.Errorf("Config reload failed: %v", err)
@@ -219,6 +220,7 @@ func Run(debug bool, configPath string, allowEmptyStartup bool) error {
 				msgBus,
 				allowEmptyStartup,
 				configPath,
+				debug,
 			)
 			if err != nil {
 				logger.Errorf("Manual reload failed: %v", err)
@@ -238,9 +240,10 @@ func executeReload(
 	msgBus *bus.MessageBus,
 	allowEmptyStartup bool,
 	configPath string,
+	debug bool,
 ) error {
 	defer runningServices.reloading.Store(false)
-	return handleConfigReload(ctx, agentLoop, newCfg, provider, runningServices, msgBus, allowEmptyStartup, configPath)
+	return handleConfigReload(ctx, agentLoop, newCfg, provider, runningServices, msgBus, allowEmptyStartup, configPath, debug)
 }
 
 func createStartupProvider(
@@ -435,8 +438,21 @@ func handleConfigReload(
 	msgBus *bus.MessageBus,
 	allowEmptyStartup bool,
 	configPath string,
+	debug bool,
 ) error {
 	logger.Info("🔄 Config file changed, reloading...")
+
+	logger.ApplyConfig(logger.LoggingConfig{
+		Level: newCfg.Logging.Level,
+		FileLogging: logger.FileLogConfig{
+			Enabled: newCfg.Logging.FileLogging.Enabled,
+			Path:    newCfg.Logging.FileLogging.Path,
+			Level:   newCfg.Logging.FileLogging.Level,
+		},
+		Console: logger.ConsoleLogConfig{
+			Level: newCfg.Logging.Console.Level,
+		},
+	}, debug)
 
 	newModel := newCfg.Agents.Defaults.ModelName
 	if newModel == "" {

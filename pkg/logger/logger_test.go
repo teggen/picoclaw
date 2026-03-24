@@ -216,11 +216,24 @@ func TestApplyConfig(t *testing.T) {
 	defer SetLevel(initialLevel)
 	defer DisableFileLogging()
 
-	t.Run("debug flag overrides config", func(t *testing.T) {
+	t.Run("debug flag overrides config level", func(t *testing.T) {
 		ApplyConfig(LoggingConfig{Level: "error"}, true)
 		if GetLevel() != DEBUG {
 			t.Errorf("Expected DEBUG level when debug=true, got %v", GetLevel())
 		}
+	})
+
+	t.Run("debug flag still configures file logging", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		logPath := filepath.Join(tmpDir, "debug-test.log")
+		ApplyConfig(LoggingConfig{
+			Level:       "error",
+			FileLogging: FileLogConfig{Enabled: true, Path: logPath, Level: "warn"},
+		}, true)
+		if _, err := os.Stat(logPath); os.IsNotExist(err) {
+			t.Error("Expected log file to be created even with debug=true")
+		}
+		DisableFileLogging()
 	})
 
 	t.Run("global level from config", func(t *testing.T) {
@@ -253,6 +266,27 @@ func TestApplyConfig(t *testing.T) {
 		}, false)
 		if GetLevel() != WARN {
 			t.Errorf("Expected WARN (console override, no file), got %v", GetLevel())
+		}
+	})
+
+	t.Run("disabling file logging via config", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		logPath := filepath.Join(tmpDir, "disable-test.log")
+		// First enable file logging
+		ApplyConfig(LoggingConfig{
+			Level:       "info",
+			FileLogging: FileLogConfig{Enabled: true, Path: logPath, Level: "debug"},
+		}, false)
+		if fileSlog == nil {
+			t.Fatal("Expected fileSlog to be non-nil after enabling file logging")
+		}
+		// Now disable it
+		ApplyConfig(LoggingConfig{
+			Level:       "info",
+			FileLogging: FileLogConfig{Enabled: false},
+		}, false)
+		if fileSlog != nil {
+			t.Error("Expected fileSlog to be nil after disabling file logging")
 		}
 	})
 
