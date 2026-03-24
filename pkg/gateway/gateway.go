@@ -50,6 +50,10 @@ const (
 	serviceShutdownTimeout  = 30 * time.Second
 	providerReloadTimeout   = 30 * time.Second
 	gracefulShutdownTimeout = 15 * time.Second
+
+	logPath   = "logs"
+	panicFile = "gateway_panic.log"
+	logFile   = "gateway.log"
 )
 
 type services struct {
@@ -82,7 +86,14 @@ func (p *startupBlockedProvider) GetDefaultModel() string {
 }
 
 // Run starts the gateway runtime using the configuration loaded from configPath.
-func Run(debug bool, configPath string, allowEmptyStartup bool) error {
+func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error {
+	panicPath := filepath.Join(homePath, logPath, panicFile)
+	panicFunc, err := logger.InitPanic(panicPath)
+	if err != nil {
+		return fmt.Errorf("error initializing panic log: %w", err)
+	}
+	defer panicFunc()
+
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("error loading config: %w", err)
@@ -455,9 +466,6 @@ func handleConfigReload(
 	}, debug)
 
 	newModel := newCfg.Agents.Defaults.ModelName
-	if newModel == "" {
-		newModel = newCfg.Agents.Defaults.Model
-	}
 
 	logger.Infof(" New model is '%s', recreating provider...", newModel)
 

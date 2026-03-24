@@ -23,9 +23,6 @@ func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 	cfg := h.agentLoop.GetConfig()
 
 	modelName := cfg.Agents.Defaults.ModelName
-	if modelName == "" {
-		modelName = cfg.Agents.Defaults.Model
-	}
 
 	json.NewEncoder(w).Encode(map[string]any{
 		"status":   "running",

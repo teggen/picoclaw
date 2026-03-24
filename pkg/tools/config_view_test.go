@@ -18,24 +18,20 @@ func newTestConfig() *config.Config {
 	}
 	cfg.Agents.Defaults.ModelName = "test-model"
 	cfg.Agents.Defaults.Workspace = "/tmp/test-workspace"
-	cfg.ModelList = []config.ModelConfig{
-		{
-			ModelName:     "gpt-4o",
-			Model:         "openai/gpt-4o",
-			APIKey:        "sk-super-secret-key-12345",
-			APIBase:       "https://api.openai.com/v1",
-			RPM:           60,
-			ThinkingLevel: "high",
-		},
-		{
-			ModelName: "local-llama",
-			Model:     "ollama/llama3",
-			APIKey:    "",
-		},
+	gpt4o := &config.ModelConfig{
+		ModelName:     "gpt-4o",
+		Model:         "openai/gpt-4o",
+		APIBase:       "https://api.openai.com/v1",
+		RPM:           60,
+		ThinkingLevel: "high",
 	}
+	gpt4o.SetAPIKey("sk-super-secret-key-12345")
+	localLlama := &config.ModelConfig{
+		ModelName: "local-llama",
+		Model:     "ollama/llama3",
+	}
+	cfg.ModelList = []*config.ModelConfig{gpt4o, localLlama}
 	cfg.Channels.Telegram.Enabled = true
-	cfg.Providers.Anthropic.APIKey = "ant-secret-key-67890"
-	cfg.Providers.OpenAI.APIKey = "sk-openai-secret"
 	return cfg
 }
 
@@ -156,23 +152,7 @@ func TestConfigViewAgents(t *testing.T) {
 }
 
 func TestConfigViewProviders(t *testing.T) {
-	tool := NewConfigViewTool(newTestConfig())
-	result := tool.Execute(context.Background(), map[string]any{"section": "providers"})
-
-	if result.IsError {
-		t.Fatalf("unexpected error: %s", result.ForLLM)
-	}
-
-	out := result.ForLLM
-	if !strings.Contains(out, "anthropic: API key [SET]") {
-		t.Error("expected anthropic key set")
-	}
-	if strings.Contains(out, "ant-secret-key-67890") {
-		t.Error("anthropic API key must not appear in output")
-	}
-	if strings.Contains(out, "sk-openai-secret") {
-		t.Error("openai API key must not appear in output")
-	}
+	t.Skip("providers section removed; model_list replaces per-provider config")
 }
 
 func TestConfigViewBuildInfo(t *testing.T) {

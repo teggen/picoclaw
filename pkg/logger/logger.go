@@ -69,22 +69,22 @@ func SetFileLevel(level LogLevel) {
 	fileLevel.Set(level)
 }
 
-// ParseLevel converts a level string to a LogLevel. Case-insensitive.
-// Returns INFO if the string is empty or unrecognized.
-func ParseLevel(s string) LogLevel {
+// ParseLevel converts a case-insensitive level name to a LogLevel.
+// Returns the level and true if valid, or (INFO, false) if unrecognized.
+func ParseLevel(s string) (LogLevel, bool) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "debug":
-		return DEBUG
+		return DEBUG, true
 	case "info":
-		return INFO
+		return INFO, true
 	case "warn", "warning":
-		return WARN
+		return WARN, true
 	case "error":
-		return ERROR
+		return ERROR, true
 	case "fatal":
-		return FATAL
+		return FATAL, true
 	default:
-		return INFO
+		return INFO, false
 	}
 }
 
@@ -93,12 +93,14 @@ func GetLevel() LogLevel {
 }
 
 // SetLevelFromString sets the log level from a string value.
-// If the string is empty, the current level is kept.
+// If the string is empty or not a recognized level name, the current level is kept.
 func SetLevelFromString(s string) {
 	if s == "" {
 		return
 	}
-	SetLevel(ParseLevel(s))
+	if level, ok := ParseLevel(s); ok {
+		SetLevel(level)
+	}
 }
 
 func EnableFileLogging(filePath string) error {

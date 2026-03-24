@@ -60,7 +60,7 @@ func newTestHarness(t *testing.T, response string) *testHarness {
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
 				Workspace:         tmpDir,
-				Model:             "mock",
+				ModelName:         "mock",
 				MaxTokens:         4096,
 				MaxToolIterations: 1,
 			},

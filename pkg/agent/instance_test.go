@@ -22,7 +22,7 @@ func TestNewAgentInstance_UsesDefaultsTemperatureAndMaxTokens(t *testing.T) {
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
 				Workspace:         tmpDir,
-				Model:             "test-model",
+				ModelName:         "test-model",
 				MaxTokens:         1234,
 				MaxToolIterations: 5,
 			},
@@ -54,7 +54,7 @@ func TestNewAgentInstance_DefaultsTemperatureWhenZero(t *testing.T) {
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
 				Workspace:         tmpDir,
-				Model:             "test-model",
+				ModelName:         "test-model",
 				MaxTokens:         1234,
 				MaxToolIterations: 5,
 			},
@@ -83,7 +83,7 @@ func TestNewAgentInstance_DefaultsTemperatureWhenUnset(t *testing.T) {
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
 				Workspace:         tmpDir,
-				Model:             "test-model",
+				ModelName:         "test-model",
 				MaxTokens:         1234,
 				MaxToolIterations: 5,
 			},
@@ -137,10 +137,10 @@ func TestNewAgentInstance_ResolveCandidatesFromModelListAlias(t *testing.T) {
 				Agents: config.AgentsConfig{
 					Defaults: config.AgentDefaults{
 						Workspace: tmpDir,
-						Model:     tt.aliasName,
+						ModelName: tt.aliasName,
 					},
 				},
-				ModelList: []config.ModelConfig{
+				ModelList: []*config.ModelConfig{
 					{
 						ModelName: tt.aliasName,
 						Model:     tt.modelName,
@@ -176,7 +176,7 @@ func TestNewAgentInstance_ContextWindowSeparateFromMaxTokens(t *testing.T) {
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
 				Workspace:     tmpDir,
-				Model:         "test-model",
+				ModelName:     "test-model",
 				MaxTokens:     8192,
 				ContextWindow: 262144,
 			},
@@ -205,7 +205,7 @@ func TestNewAgentInstance_ContextWindowFallsBackToMaxTokens(t *testing.T) {
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
 				Workspace: tmpDir,
-				Model:     "test-model",
+				ModelName: "test-model",
 				MaxTokens: 4096,
 			},
 		},
@@ -214,8 +214,9 @@ func TestNewAgentInstance_ContextWindowFallsBackToMaxTokens(t *testing.T) {
 	provider := &mockProvider{}
 	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg, provider)
 
-	if agent.ContextWindow != 4096 {
-		t.Fatalf("ContextWindow = %d, want %d (should fall back to MaxTokens)", agent.ContextWindow, 4096)
+	// When ContextWindow is unset, it defaults to MaxTokens * 4
+	if agent.ContextWindow != 4096*4 {
+		t.Fatalf("ContextWindow = %d, want %d (should default to 4x MaxTokens)", agent.ContextWindow, 4096*4)
 	}
 }
 

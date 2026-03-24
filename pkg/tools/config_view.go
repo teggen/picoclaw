@@ -56,13 +56,11 @@ func (t *ConfigViewTool) Execute(_ context.Context, args map[string]any) *ToolRe
 		return SilentResult(t.tools())
 	case "agents":
 		return SilentResult(t.agents())
-	case "providers":
-		return SilentResult(t.providers())
 	case "build_info":
 		return SilentResult(t.buildInfo())
 	default:
 		return ErrorResult(fmt.Sprintf(
-			"unknown section: %q (valid: overview, models, channels, tools, agents, providers, build_info)",
+			"unknown section: %q (valid: overview, models, channels, tools, agents, build_info)",
 			section,
 		))
 	}
@@ -83,7 +81,7 @@ func (t *ConfigViewTool) overview() string {
 
 	configuredModels := 0
 	for _, m := range t.cfg.ModelList {
-		if m.APIKey != "" {
+		if m.APIKey() != "" {
 			configuredModels++
 		}
 	}
@@ -110,7 +108,7 @@ func (t *ConfigViewTool) models() string {
 		if m.APIBase != "" {
 			fmt.Fprintf(&b, "  API Base: %s\n", m.APIBase)
 		}
-		fmt.Fprintf(&b, "  API Key: %s\n", redactKey(m.APIKey))
+		fmt.Fprintf(&b, "  API Key: %s\n", redactKey(m.APIKey()))
 		if m.RPM > 0 {
 			fmt.Fprintf(&b, "  RPM: %d\n", m.RPM)
 		}
@@ -219,48 +217,6 @@ func (t *ConfigViewTool) agents() string {
 				fmt.Fprintf(&b, "  Skills: %s\n", strings.Join(a.Skills, ", "))
 			}
 		}
-	}
-
-	return b.String()
-}
-
-func (t *ConfigViewTool) providers() string {
-	var b strings.Builder
-	b.WriteString("=== Providers (legacy) ===\n")
-
-	p := t.cfg.Providers
-	entries := []struct {
-		name   string
-		apiKey string
-	}{
-		{"anthropic", p.Anthropic.APIKey},
-		{"openai", p.OpenAI.APIKey},
-		{"litellm", p.LiteLLM.APIKey},
-		{"openrouter", p.OpenRouter.APIKey},
-		{"groq", p.Groq.APIKey},
-		{"zhipu", p.Zhipu.APIKey},
-		{"vllm", p.VLLM.APIKey},
-		{"gemini", p.Gemini.APIKey},
-		{"nvidia", p.Nvidia.APIKey},
-		{"ollama", p.Ollama.APIKey},
-		{"moonshot", p.Moonshot.APIKey},
-		{"shengsuanyun", p.ShengSuanYun.APIKey},
-		{"deepseek", p.DeepSeek.APIKey},
-		{"cerebras", p.Cerebras.APIKey},
-		{"vivgrid", p.Vivgrid.APIKey},
-		{"volcengine", p.VolcEngine.APIKey},
-		{"github_copilot", p.GitHubCopilot.APIKey},
-		{"antigravity", p.Antigravity.APIKey},
-		{"qwen", p.Qwen.APIKey},
-		{"mistral", p.Mistral.APIKey},
-		{"avian", p.Avian.APIKey},
-		{"minimax", p.Minimax.APIKey},
-		{"longcat", p.LongCat.APIKey},
-		{"modelscope", p.ModelScope.APIKey},
-	}
-
-	for _, e := range entries {
-		fmt.Fprintf(&b, "- %s: API key %s\n", e.name, redactKey(e.apiKey))
 	}
 
 	return b.String()

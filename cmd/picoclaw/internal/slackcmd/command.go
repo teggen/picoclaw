@@ -24,10 +24,10 @@ func NewSlackCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("error loading config: %w", err)
 			}
-			if cfg.Channels.Slack.BotToken == "" {
+			if cfg.Channels.Slack.BotToken() == "" {
 				return fmt.Errorf("slack bot_token is not configured")
 			}
-			client = slack.New(cfg.Channels.Slack.BotToken)
+			client = slack.New(cfg.Channels.Slack.BotToken())
 			return nil
 		},
 	}

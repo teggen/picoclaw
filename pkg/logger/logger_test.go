@@ -154,29 +154,33 @@ func TestParseLevel(t *testing.T) {
 	tests := []struct {
 		input string
 		want  LogLevel
+		ok    bool
 	}{
-		{"debug", DEBUG},
-		{"DEBUG", DEBUG},
-		{"Debug", DEBUG},
-		{"info", INFO},
-		{"INFO", INFO},
-		{"warn", WARN},
-		{"WARN", WARN},
-		{"warning", WARN},
-		{"WARNING", WARN},
-		{"error", ERROR},
-		{"ERROR", ERROR},
-		{"fatal", FATAL},
-		{"FATAL", FATAL},
-		{"  info  ", INFO},
-		{"", INFO},
-		{"unknown", INFO},
-		{"  debug  ", DEBUG},
+		{"debug", DEBUG, true},
+		{"DEBUG", DEBUG, true},
+		{"Debug", DEBUG, true},
+		{"info", INFO, true},
+		{"INFO", INFO, true},
+		{"warn", WARN, true},
+		{"WARN", WARN, true},
+		{"warning", WARN, true},
+		{"WARNING", WARN, true},
+		{"error", ERROR, true},
+		{"ERROR", ERROR, true},
+		{"fatal", FATAL, true},
+		{"FATAL", FATAL, true},
+		{"  info  ", INFO, true},
+		{"", INFO, false},
+		{"unknown", INFO, false},
+		{"  debug  ", DEBUG, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got := ParseLevel(tt.input)
+			got, ok := ParseLevel(tt.input)
+			if ok != tt.ok {
+				t.Errorf("ParseLevel(%q) ok = %v, want %v", tt.input, ok, tt.ok)
+			}
 			if got != tt.want {
 				t.Errorf("ParseLevel(%q) = %v, want %v", tt.input, got, tt.want)
 			}
@@ -309,17 +313,26 @@ func TestSetLevelFromString(t *testing.T) {
 	initialLevel := GetLevel()
 	defer SetLevel(initialLevel)
 
+	// Valid string changes the level
 	SetLevel(INFO)
 	SetLevelFromString("error")
 	if got := GetLevel(); got != ERROR {
 		t.Errorf("after SetLevelFromString(\"error\"): GetLevel() = %v, want ERROR", got)
 	}
 
+	// Empty string is a no-op
 	SetLevelFromString("")
 	if got := GetLevel(); got != ERROR {
 		t.Errorf("after SetLevelFromString(\"\"): GetLevel() = %v, want ERROR (unchanged)", got)
 	}
 
+	// Invalid string is a no-op
+	SetLevelFromString("garbage")
+	if got := GetLevel(); got != ERROR {
+		t.Errorf("after SetLevelFromString(\"garbage\"): GetLevel() = %v, want ERROR (unchanged)", got)
+	}
+
+	// Case-insensitive
 	SetLevelFromString("FATAL")
 	if got := GetLevel(); got != FATAL {
 		t.Errorf("after SetLevelFromString(\"FATAL\"): GetLevel() = %v, want FATAL", got)

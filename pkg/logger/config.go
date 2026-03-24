@@ -25,17 +25,17 @@ func ApplyConfig(cfg LoggingConfig, debug bool) {
 		cfg.Level = "debug"
 	}
 
-	globalLevel := ParseLevel(cfg.Level)
+	globalLevel, _ := ParseLevel(cfg.Level)
 
 	// Determine effective levels for each output
 	consoleLevel := globalLevel
 	if cfg.Console.Level != "" {
-		consoleLevel = ParseLevel(cfg.Console.Level)
+		consoleLevel, _ = ParseLevel(cfg.Console.Level)
 	}
 
 	fileLevel := globalLevel
 	if cfg.FileLogging.Level != "" {
-		fileLevel = ParseLevel(cfg.FileLogging.Level)
+		fileLevel, _ = ParseLevel(cfg.FileLogging.Level)
 	}
 
 	// Set global level to the minimum of all active outputs so messages
