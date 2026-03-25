@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,6 +14,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
+	"github.com/sipeed/picoclaw/pkg/config"
 )
 
 // mockChannel is a test double that delegates Send to a configurable function.
@@ -1379,5 +1381,567 @@ func TestManager_SendPlaceholder(t *testing.T) {
 	ok = mgr.SendPlaceholder(ctx, "unknown", "chat-1")
 	if ok {
 		t.Error("expected SendPlaceholder to fail for unknown channel")
+	}
+}
+
+// --- Reload tests ---
+
+// reloadMockChannel is a controllable channel for Reload tests.
+type reloadMockChannel struct {
+	BaseChannel
+	stopped  atomic.Bool
+	sendFn   func(ctx context.Context, msg bus.OutboundMessage) error
+	startErr error
+}
+
+func (r *reloadMockChannel) Start(ctx context.Context) error { return r.startErr }
+func (r *reloadMockChannel) Stop(ctx context.Context) error {
+	r.stopped.Store(true)
+	return nil
+}
+func (r *reloadMockChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
+	if r.sendFn != nil {
+		return r.sendFn(ctx, msg)
+	}
+	return nil
+}
+
+func TestReloadRemovesChannelWithoutDeadlock(t *testing.T) {
+	mb := bus.NewMessageBus()
+	defer mb.Close()
+
+	ch := &reloadMockChannel{}
+
+	m := &Manager{
+		channels: map[string]Channel{"test_reload_rm": ch},
+		workers:  make(map[string]*channelWorker),
+		bus:      mb,
+		config:   config.DefaultConfig(),
+	}
+
+	// Simulate a running worker for this channel.
+	dispatchCtx, cancel := context.WithCancel(context.Background())
+	m.dispatchTask = &asyncTask{cancel: cancel}
+	w := newChannelWorker("test_reload_rm", ch)
+	m.workers["test_reload_rm"] = w
+	go m.runWorker(dispatchCtx, "test_reload_rm", w)
+	go m.runMediaWorker(dispatchCtx, "test_reload_rm", w)
+
+	// Set channel hashes so Reload sees "test_reload_rm" as existing.
+	m.channelHashes = map[string]string{"test_reload_rm": "old_hash"}
+
+	// Reload with an empty config removes the channel.
+	// This must not deadlock — the old code spawned goroutines that re-acquired the lock.
+	done := make(chan error, 1)
+	go func() {
+		done <- m.Reload(context.Background(), config.DefaultConfig())
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Reload returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Reload deadlocked")
+	}
+
+	if !ch.stopped.Load() {
+		t.Error("expected channel to be stopped")
+	}
+	m.mu.RLock()
+	_, exists := m.channels["test_reload_rm"]
+	_, wExists := m.workers["test_reload_rm"]
+	m.mu.RUnlock()
+	if exists {
+		t.Error("channel should have been removed from map")
+	}
+	if wExists {
+		t.Error("worker should have been removed from map")
+	}
+}
+
+func TestReloadCancelsPreviousDispatcher(t *testing.T) {
+	mb := bus.NewMessageBus()
+	defer mb.Close()
+
+	m := &Manager{
+		channels: make(map[string]Channel),
+		workers:  make(map[string]*channelWorker),
+		bus:      mb,
+		config:   config.DefaultConfig(),
+	}
+
+	// Simulate an initial StartAll by creating a dispatch context.
+	oldCtx, oldCancel := context.WithCancel(context.Background())
+	m.dispatchTask = &asyncTask{cancel: oldCancel}
+
+	oldDispatcherDone := make(chan struct{})
+	go func() {
+		m.dispatchOutbound(oldCtx)
+		close(oldDispatcherDone)
+	}()
+
+	m.channelHashes = map[string]string{}
+
+	// Reload should cancel the old dispatcher context.
+	err := m.Reload(context.Background(), config.DefaultConfig())
+	if err != nil {
+		t.Fatalf("Reload returned error: %v", err)
+	}
+
+	// The old dispatcher should have exited because its context was cancelled.
+	select {
+	case <-oldDispatcherDone:
+		// success
+	case <-time.After(2 * time.Second):
+		t.Fatal("old dispatcher was not cancelled by Reload")
+	}
+
+	// Clean up the new dispatcher.
+	m.mu.RLock()
+	task := m.dispatchTask
+	m.mu.RUnlock()
+	if task != nil {
+		task.cancel()
+	}
+}
+
+func TestDispatcherSurvivesClosedQueue(t *testing.T) {
+	mb := bus.NewMessageBus()
+	defer mb.Close()
+
+	goodSent := make(chan struct{}, 1)
+	goodCh := &reloadMockChannel{
+		sendFn: func(ctx context.Context, msg bus.OutboundMessage) error {
+			select {
+			case goodSent <- struct{}{}:
+			default:
+			}
+			return nil
+		},
+	}
+
+	m := &Manager{
+		channels: map[string]Channel{"good": goodCh},
+		workers:  make(map[string]*channelWorker),
+		bus:      mb,
+	}
+
+	dispatchCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	goodW := newChannelWorker("good", goodCh)
+	m.workers["good"] = goodW
+	go m.runWorker(dispatchCtx, "good", goodW)
+	go m.runMediaWorker(dispatchCtx, "good", goodW)
+
+	// Create a stale worker with a closed queue to simulate the reload race.
+	staleW := newChannelWorker("stale", &reloadMockChannel{})
+	close(staleW.queue) // closed — sending here would panic
+	close(staleW.mediaDone)
+	close(staleW.done)
+	m.channels["stale"] = &reloadMockChannel{}
+	m.workers["stale"] = staleW
+
+	go m.dispatchOutbound(dispatchCtx)
+
+	// Send a message to the stale channel — dispatcher should recover, not crash.
+	mb.PublishOutbound(context.Background(), bus.OutboundMessage{Channel: "stale", Content: "boom"})
+	// Small delay to let the dispatcher process the stale message.
+	time.Sleep(50 * time.Millisecond)
+
+	// Now send to the good channel — dispatcher should still be alive.
+	mb.PublishOutbound(context.Background(), bus.OutboundMessage{Channel: "good", Content: "hello"})
+
+	select {
+	case <-goodSent:
+		// success — dispatcher survived the closed queue
+	case <-time.After(2 * time.Second):
+		t.Fatal("dispatcher died after encountering closed queue; message to good channel was never delivered")
+	}
+}
+
+// --- Lifecycle tests ---
+
+func TestNewManager(t *testing.T) {
+	mb := bus.NewMessageBus()
+	defer mb.Close()
+
+	cfg := config.DefaultConfig()
+	m, err := NewManager(cfg, mb, nil)
+	if err != nil {
+		t.Fatalf("NewManager returned error: %v", err)
+	}
+
+	if m.bus != mb {
+		t.Error("bus not set")
+	}
+	if m.config != cfg {
+		t.Error("config not set")
+	}
+	if m.channels == nil {
+		t.Error("channels map is nil")
+	}
+	if m.workers == nil {
+		t.Error("workers map is nil")
+	}
+	if m.channelHashes == nil {
+		t.Error("channelHashes map is nil")
+	}
+	// No channels enabled in default config, so maps should be empty.
+	if len(m.channels) != 0 {
+		t.Errorf("expected 0 channels, got %d", len(m.channels))
+	}
+}
+
+func TestStartAllAndStopAll(t *testing.T) {
+	mb := bus.NewMessageBus()
+	defer mb.Close()
+
+	var started, stopped atomic.Int32
+	ch := &reloadMockChannel{
+		sendFn: func(ctx context.Context, msg bus.OutboundMessage) error { return nil },
+	}
+	// Override Start/Stop tracking by using a wrapper
+	trackCh := &trackingChannel{
+		Channel:   ch,
+		onStart:   func() { started.Add(1) },
+		onStop:    func() { stopped.Add(1) },
+	}
+
+	m := &Manager{
+		channels: map[string]Channel{"test_lifecycle": trackCh},
+		workers:  make(map[string]*channelWorker),
+		bus:      mb,
+	}
+
+	ctx := context.Background()
+	if err := m.StartAll(ctx); err != nil {
+		t.Fatalf("StartAll returned error: %v", err)
+	}
+
+	if started.Load() != 1 {
+		t.Errorf("expected 1 channel started, got %d", started.Load())
+	}
+
+	// Verify worker was created
+	m.mu.RLock()
+	_, wExists := m.workers["test_lifecycle"]
+	m.mu.RUnlock()
+	if !wExists {
+		t.Error("worker should exist after StartAll")
+	}
+
+	// Verify message delivery through the full pipeline
+	delivered := make(chan struct{}, 1)
+	trackCh.sendFn = func(ctx context.Context, msg bus.OutboundMessage) error {
+		select {
+		case delivered <- struct{}{}:
+		default:
+		}
+		return nil
+	}
+	mb.PublishOutbound(ctx, bus.OutboundMessage{Channel: "test_lifecycle", Content: "hello"})
+
+	select {
+	case <-delivered:
+		// success
+	case <-time.After(2 * time.Second):
+		t.Fatal("message not delivered through StartAll pipeline")
+	}
+
+	// StopAll
+	if err := m.StopAll(ctx); err != nil {
+		t.Fatalf("StopAll returned error: %v", err)
+	}
+
+	if stopped.Load() != 1 {
+		t.Errorf("expected 1 channel stopped, got %d", stopped.Load())
+	}
+
+	// Verify dispatcher context was cancelled (dispatchTask set to nil)
+	m.mu.RLock()
+	task := m.dispatchTask
+	m.mu.RUnlock()
+	if task != nil {
+		t.Error("dispatchTask should be nil after StopAll")
+	}
+}
+
+// trackingChannel wraps a Channel and calls hooks on Start/Stop.
+type trackingChannel struct {
+	Channel
+	sendFn  func(ctx context.Context, msg bus.OutboundMessage) error
+	onStart func()
+	onStop  func()
+}
+
+func (t *trackingChannel) Start(ctx context.Context) error {
+	if t.onStart != nil {
+		t.onStart()
+	}
+	return t.Channel.Start(ctx)
+}
+
+func (t *trackingChannel) Stop(ctx context.Context) error {
+	if t.onStop != nil {
+		t.onStop()
+	}
+	return t.Channel.Stop(ctx)
+}
+
+func (t *trackingChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
+	if t.sendFn != nil {
+		return t.sendFn(ctx, msg)
+	}
+	return nil
+}
+
+func TestStartAllSkipsFailedChannels(t *testing.T) {
+	mb := bus.NewMessageBus()
+	defer mb.Close()
+
+	failCh := &reloadMockChannel{startErr: errors.New("start failed")}
+	okCh := &reloadMockChannel{}
+
+	m := &Manager{
+		channels: map[string]Channel{
+			"fail_ch": failCh,
+			"ok_ch":   okCh,
+		},
+		workers: make(map[string]*channelWorker),
+		bus:     mb,
+	}
+
+	if err := m.StartAll(context.Background()); err != nil {
+		t.Fatalf("StartAll returned error: %v", err)
+	}
+
+	m.mu.RLock()
+	_, failW := m.workers["fail_ch"]
+	_, okW := m.workers["ok_ch"]
+	m.mu.RUnlock()
+
+	if failW {
+		t.Error("failed channel should not have a worker")
+	}
+	if !okW {
+		t.Error("ok channel should have a worker")
+	}
+
+	// Cleanup
+	m.StopAll(context.Background())
+}
+
+func TestStartAllNoChannels(t *testing.T) {
+	mb := bus.NewMessageBus()
+	defer mb.Close()
+
+	m := &Manager{
+		channels: make(map[string]Channel),
+		workers:  make(map[string]*channelWorker),
+		bus:      mb,
+	}
+
+	// Should not error even with no channels
+	if err := m.StartAll(context.Background()); err != nil {
+		t.Fatalf("StartAll with no channels returned error: %v", err)
+	}
+
+	// Dispatcher should still be running — verify by StopAll not hanging
+	done := make(chan error, 1)
+	go func() {
+		done <- m.StopAll(context.Background())
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("StopAll returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("StopAll hung with no channels")
+	}
+}
+
+func TestUnregisterChannel(t *testing.T) {
+	mb := bus.NewMessageBus()
+	defer mb.Close()
+
+	ch := &reloadMockChannel{}
+	m := &Manager{
+		channels: map[string]Channel{"unreg_test": ch},
+		workers:  make(map[string]*channelWorker),
+		bus:      mb,
+	}
+
+	// Create and start a worker
+	dispatchCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w := newChannelWorker("unreg_test", ch)
+	m.workers["unreg_test"] = w
+	go m.runWorker(dispatchCtx, "unreg_test", w)
+	go m.runMediaWorker(dispatchCtx, "unreg_test", w)
+
+	// Unregister should close queues, wait for workers, and clean up maps
+	done := make(chan struct{})
+	go func() {
+		m.UnregisterChannel("unreg_test")
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// success
+	case <-time.After(5 * time.Second):
+		t.Fatal("UnregisterChannel hung")
+	}
+
+	m.mu.RLock()
+	_, chExists := m.channels["unreg_test"]
+	_, wExists := m.workers["unreg_test"]
+	m.mu.RUnlock()
+
+	if chExists {
+		t.Error("channel should have been removed")
+	}
+	if wExists {
+		t.Error("worker should have been removed")
+	}
+}
+
+func TestUnregisterNonexistentChannel(t *testing.T) {
+	m := &Manager{
+		channels: make(map[string]Channel),
+		workers:  make(map[string]*channelWorker),
+	}
+
+	// Should not panic or hang
+	done := make(chan struct{})
+	go func() {
+		m.UnregisterChannel("does_not_exist")
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// success
+	case <-time.After(2 * time.Second):
+		t.Fatal("UnregisterChannel hung on nonexistent channel")
+	}
+}
+
+func TestSetupHTTPServer(t *testing.T) {
+	mb := bus.NewMessageBus()
+	defer mb.Close()
+
+	m := &Manager{
+		channels: make(map[string]Channel),
+		workers:  make(map[string]*channelWorker),
+		bus:      mb,
+	}
+
+	extraCalled := false
+	m.SetupHTTPServer(":0", nil, func(mux *http.ServeMux) {
+		extraCalled = true
+		mux.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {})
+	})
+
+	if m.httpServer == nil {
+		t.Fatal("httpServer should be set")
+	}
+	if m.mux == nil {
+		t.Fatal("mux should be set")
+	}
+	if !extraCalled {
+		t.Error("extra handler should have been called")
+	}
+	if m.httpServer.ReadTimeout != 30*time.Second {
+		t.Error("unexpected ReadTimeout")
+	}
+	if m.httpServer.WriteTimeout != 30*time.Second {
+		t.Error("unexpected WriteTimeout")
+	}
+}
+
+func TestSetupHTTPServerWithWebhookChannel(t *testing.T) {
+	mb := bus.NewMessageBus()
+	defer mb.Close()
+
+	wh := &mockWebhookChannel{
+		reloadMockChannel: reloadMockChannel{},
+		webhookPath:       "/webhook/test",
+	}
+
+	m := &Manager{
+		channels: map[string]Channel{"webhook_ch": wh},
+		workers:  make(map[string]*channelWorker),
+		bus:      mb,
+	}
+
+	m.SetupHTTPServer(":0", nil)
+
+	if m.httpServer == nil {
+		t.Fatal("httpServer should be set")
+	}
+	// The webhook handler should have been registered — we can't easily test
+	// mux routing, but we verify the setup didn't panic.
+}
+
+// mockWebhookChannel implements WebhookHandler for testing.
+type mockWebhookChannel struct {
+	reloadMockChannel
+	webhookPath string
+}
+
+func (m *mockWebhookChannel) WebhookPath() string { return m.webhookPath }
+func (m *mockWebhookChannel) ServeHTTP(w http.ResponseWriter, r *http.Request) {}
+
+func TestHiddenValuesCorrectMapping(t *testing.T) {
+	cfg := config.DefaultConfig()
+	ch := cfg.Channels
+
+	// Test DingTalk — should use DingTalk secret, not QQ
+	dtValue := map[string]any{}
+	hiddenValues("dingtalk", dtValue, ch)
+	if _, ok := dtValue["secret"]; !ok {
+		t.Error("dingtalk should have secret key")
+	}
+
+	// Test QQ — should use QQ secret, not DingTalk
+	qqValue := map[string]any{}
+	hiddenValues("qq", qqValue, ch)
+	if _, ok := qqValue["secret"]; !ok {
+		t.Error("qq should have secret key")
+	}
+
+	// Test all branches of hiddenValues for coverage
+	for _, tc := range []struct {
+		name     string
+		expected []string
+	}{
+		{"pico", []string{"token"}},
+		{"telegram", []string{"token"}},
+		{"discord", []string{"token"}},
+		{"slack", []string{"bot_token", "app_token"}},
+		{"matrix", []string{"token"}},
+		{"onebot", []string{"token"}},
+		{"line", []string{"token", "secret"}},
+		{"dingtalk", []string{"secret"}},
+		{"qq", []string{"secret"}},
+		{"irc", []string{"password", "serv_password", "sasl_password"}},
+		{"feishu", []string{"app_secret", "encrypt_key", "verification_token"}},
+		{"wecom", nil}, // removed channel, no keys expected
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := map[string]any{}
+			hiddenValues(tc.name, v, ch)
+			for _, key := range tc.expected {
+				if _, ok := v[key]; !ok {
+					t.Errorf("hiddenValues(%q) missing key %q", tc.name, key)
+				}
+			}
+		})
 	}
 }

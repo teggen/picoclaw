@@ -615,6 +615,14 @@ func newChannelWorker(name string, ch Channel) *channelWorker {
 // messages that exceed the channel's maximum message length.
 func (m *Manager) runWorker(ctx context.Context, name string, w *channelWorker) {
 	defer close(w.done)
+	defer func() {
+		if r := recover(); r != nil {
+			logger.ErrorCF("channels", "Worker panicked", map[string]any{
+				"channel": name,
+				"panic":   fmt.Sprint(r),
+			})
+		}
+	}()
 	for {
 		select {
 		case msg, ok := <-w.queue:
@@ -743,8 +751,18 @@ func dispatchLoop[M any](
 			}
 
 			if wExists && w != nil {
-				if !enqueue(ctx, w, msg) {
-					return
+				sent := func() (ok bool) {
+					defer func() {
+						if r := recover(); r != nil {
+							// Queue was closed during reload; skip this message, not the whole loop.
+							logger.DebugCF("channels", "Worker queue closed during dispatch", map[string]any{"recover": fmt.Sprint(r)})
+							ok = true // true = keep dispatching other channels
+						}
+					}()
+					return enqueue(ctx, w, msg)
+				}()
+				if !sent {
+					return // context cancelled — stop dispatcher
 				}
 			} else if exists {
 				logger.WarnCF("channels", noWorkerMsg, map[string]any{"channel": channel})
@@ -796,6 +814,14 @@ func (m *Manager) dispatchOutboundMedia(ctx context.Context) {
 // runMediaWorker processes outbound media messages for a single channel.
 func (m *Manager) runMediaWorker(ctx context.Context, name string, w *channelWorker) {
 	defer close(w.mediaDone)
+	defer func() {
+		if r := recover(); r != nil {
+			logger.ErrorCF("channels", "Media worker panicked", map[string]any{
+				"channel": name,
+				"panic":   fmt.Sprint(r),
+			})
+		}
+	}()
 	for {
 		select {
 		case msg, ok := <-w.mediaQueue:
@@ -966,7 +992,7 @@ func (m *Manager) Reload(ctx context.Context, cfg *config.Config) error {
 	list := toChannelHashes(cfg)
 	added, removed := compareChannels(m.channelHashes, list)
 	for _, name := range removed {
-		// Stop all channels
+		// Stop channel and clean up its worker inline (lock already held).
 		channel := m.channels[name]
 		logger.InfoCF("channels", "Stopping channel", map[string]any{
 			"channel": name,
@@ -977,12 +1003,27 @@ func (m *Manager) Reload(ctx context.Context, cfg *config.Config) error {
 				"error":   err.Error(),
 			})
 		}
-		go func() {
-			m.UnregisterChannel(name)
-		}()
+		if w, ok := m.workers[name]; ok && w != nil {
+			close(w.queue)
+			<-w.done
+			close(w.mediaQueue)
+			<-w.mediaDone
+		}
+		delete(m.workers, name)
+		delete(m.channels, name)
+	}
+	// Cancel the previous dispatcher/janitor before starting new ones.
+	if m.dispatchTask != nil {
+		m.dispatchTask.cancel()
 	}
 	dispatchCtx, cancel := context.WithCancel(ctx)
 	m.dispatchTask = &asyncTask{cancel: cancel}
+
+	// Start new dispatchers and janitor for the updated channel set.
+	go m.dispatchOutbound(dispatchCtx)
+	go m.dispatchOutboundMedia(dispatchCtx)
+	go m.runTTLJanitor(dispatchCtx)
+
 	cc, err := toChannelConfig(cfg, added)
 	if err != nil {
 		logger.ErrorC("channels", fmt.Sprintf("toChannelConfig error: %v", err))
@@ -1010,9 +1051,7 @@ func (m *Manager) Reload(ctx context.Context, cfg *config.Config) error {
 		m.workers[name] = w
 		go m.runWorker(dispatchCtx, name, w)
 		go m.runMediaWorker(dispatchCtx, name, w)
-		go func() {
-			m.RegisterChannel(name, channel)
-		}()
+		// Channel already in m.channels via initChannels; no extra registration needed.
 	}
 
 	m.config = cfg

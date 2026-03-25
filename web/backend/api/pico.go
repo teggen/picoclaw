@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httputil"
-	"time"
 
 	"github.com/sipeed/picoclaw/pkg/config"
 )
@@ -161,8 +160,9 @@ func (h *Handler) handlePicoSetup(w http.ResponseWriter, r *http.Request) {
 func generateSecureToken() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		// Fallback to something pseudo-random if crypto/rand fails
-		return fmt.Sprintf("pico_%x", time.Now().UnixNano())
+		// crypto/rand failure indicates a broken system; do not fall back to
+		// predictable randomness as it would produce guessable tokens.
+		panic("crypto/rand is unavailable: " + err.Error())
 	}
 	return hex.EncodeToString(b)
 }
