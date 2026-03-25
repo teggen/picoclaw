@@ -10,30 +10,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/config"
 )
 
-func (h *Handler) effectiveLauncherPublic() bool {
-	if h.serverPublicExplicit {
-		return h.serverPublic
-	}
-
-	cfg, err := h.loadLauncherConfig()
-	if err == nil {
-		return cfg.Public
-	}
-
-	return h.serverPublic
-}
-
-func (h *Handler) gatewayHostOverride() string {
-	if h.effectiveLauncherPublic() {
-		return "0.0.0.0"
-	}
-	return ""
-}
-
 func (h *Handler) effectiveGatewayBindHost(cfg *config.Config) string {
-	if override := h.gatewayHostOverride(); override != "" {
-		return override
-	}
 	if cfg == nil {
 		return ""
 	}

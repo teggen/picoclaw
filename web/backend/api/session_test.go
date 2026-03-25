@@ -320,3 +320,157 @@ func TestHandleSessions_FiltersEmptyJSONLFiles(t *testing.T) {
 		t.Fatalf("detail status = %d, want %d, body=%s", detailRec.Code, http.StatusNotFound, detailRec.Body.String())
 	}
 }
+
+func TestHandleListSessions_MissingDirectory(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	// Don't create the sessions dir — it should return empty list with 200.
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var items []sessionListItem
+	if err := json.Unmarshal(rec.Body.Bytes(), &items); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("len(items) = %d, want 0", len(items))
+	}
+}
+
+func TestHandleListSessions_UnreadableDirectory(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	dir := sessionsTestDir(t, configPath)
+
+	// Remove all permissions so ReadDir fails with a permission error.
+	if err := os.Chmod(dir, 0o000); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o755) })
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusInternalServerError, rec.Body.String())
+	}
+}
+
+func TestHandleListSessions_MalformedSessionFileSkipped(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	dir := sessionsTestDir(t, configPath)
+
+	// Write a valid session.
+	store, err := memory.NewJSONLStore(dir)
+	if err != nil {
+		t.Fatalf("NewJSONLStore() error = %v", err)
+	}
+	validKey := picoSessionPrefix + "valid-session"
+	if err := store.AddFullMessage(nil, validKey, providers.Message{
+		Role:    "user",
+		Content: "hello",
+	}); err != nil {
+		t.Fatalf("AddFullMessage() error = %v", err)
+	}
+
+	// Write a malformed legacy JSON session alongside it.
+	corruptName := sanitizeSessionKey(picoSessionPrefix+"corrupt-session") + ".json"
+	if err := os.WriteFile(filepath.Join(dir, corruptName), []byte("{invalid json"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var items []sessionListItem
+	if err := json.Unmarshal(rec.Body.Bytes(), &items); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1 (valid session only)", len(items))
+	}
+	if items[0].ID != "valid-session" {
+		t.Fatalf("items[0].ID = %q, want %q", items[0].ID, "valid-session")
+	}
+}
+
+func TestHandleListSessions_SortsByTimeNotString(t *testing.T) {
+	configPath, cleanup := setupOAuthTestEnv(t)
+	defer cleanup()
+
+	dir := sessionsTestDir(t, configPath)
+	store, err := memory.NewJSONLStore(dir)
+	if err != nil {
+		t.Fatalf("NewJSONLStore() error = %v", err)
+	}
+
+	// Create "older" session first, then "newer" session.
+	// The newer session should appear first in results.
+	olderKey := picoSessionPrefix + "older"
+	if err := store.AddFullMessage(nil, olderKey, providers.Message{
+		Role: "user", Content: "old message",
+	}); err != nil {
+		t.Fatalf("AddFullMessage(older) error = %v", err)
+	}
+
+	newerKey := picoSessionPrefix + "newer"
+	if err := store.AddFullMessage(nil, newerKey, providers.Message{
+		Role: "user", Content: "new message",
+	}); err != nil {
+		t.Fatalf("AddFullMessage(newer) error = %v", err)
+	}
+
+	h := NewHandler(configPath)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var items []sessionListItem
+	if err := json.Unmarshal(rec.Body.Bytes(), &items); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("len(items) = %d, want 2", len(items))
+	}
+	// The session created last should sort first (most recent).
+	if items[0].ID != "newer" {
+		t.Fatalf("items[0].ID = %q, want %q (most recent first)", items[0].ID, "newer")
+	}
+	if items[1].ID != "older" {
+		t.Fatalf("items[1].ID = %q, want %q", items[1].ID, "older")
+	}
+}

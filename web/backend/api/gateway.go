@@ -389,9 +389,6 @@ func (h *Handler) startGatewayLocked(initialStatus string, existingPid int) (int
 	if h.configPath != "" {
 		cmd.Env = append(cmd.Env, config.EnvConfig+"="+h.configPath)
 	}
-	if host := h.gatewayHostOverride(); host != "" {
-		cmd.Env = append(cmd.Env, config.EnvGatewayHost+"="+host)
-	}
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {

@@ -34,12 +34,13 @@ type sessionFile struct {
 
 // sessionListItem is a lightweight summary returned by GET /api/sessions.
 type sessionListItem struct {
-	ID           string `json:"id"`
-	Title        string `json:"title"`
-	Preview      string `json:"preview"`
-	MessageCount int    `json:"message_count"`
-	Created      string `json:"created"`
-	Updated      string `json:"updated"`
+	ID           string    `json:"id"`
+	Title        string    `json:"title"`
+	Preview      string    `json:"preview"`
+	MessageCount int       `json:"message_count"`
+	Created      string    `json:"created"`
+	Updated      string    `json:"updated"`
+	updatedTime  time.Time // unexported; used for sorting, omitted from JSON
 }
 
 type sessionMetaFile struct {
@@ -229,6 +230,7 @@ func buildSessionListItem(sessionID string, sess sessionFile) sessionListItem {
 		MessageCount: validMessageCount,
 		Created:      sess.Created.Format(time.RFC3339),
 		Updated:      sess.Updated.Format(time.RFC3339),
+		updatedTime:  sess.Updated,
 	}
 }
 
@@ -286,9 +288,13 @@ func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		// Directory doesn't exist yet = no sessions
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]sessionListItem{})
+		if errors.Is(err, os.ErrNotExist) {
+			// Directory doesn't exist yet = no sessions
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode([]sessionListItem{})
+			return
+		}
+		http.Error(w, "failed to read sessions directory", http.StatusInternalServerError)
 		return
 	}
 
@@ -367,7 +373,7 @@ func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 
 	// Sort by updated descending (most recent first)
 	sort.Slice(items, func(i, j int) bool {
-		return items[i].Updated > items[j].Updated
+		return items[i].updatedTime.After(items[j].updatedTime)
 	})
 
 	// Pagination parameters

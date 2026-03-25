@@ -10,42 +10,32 @@ import (
 	"time"
 
 	"github.com/sipeed/picoclaw/pkg/config"
-	"github.com/sipeed/picoclaw/web/backend/launcherconfig"
 )
 
-func TestGatewayHostOverrideUsesExplicitRuntimePublic(t *testing.T) {
+func TestPublicLauncherDoesNotOverrideGatewayBind(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
-	launcherPath := launcherconfig.PathForAppConfig(configPath)
-	if err := launcherconfig.Save(launcherPath, launcherconfig.Config{
-		Port:   18800,
-		Public: false,
-	}); err != nil {
-		t.Fatalf("launcherconfig.Save() error = %v", err)
+	cfg := config.DefaultConfig()
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = 18790
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
 	}
 
 	h := NewHandler(configPath)
 	h.SetServerOptions(18800, true, true, nil)
 
-	if got := h.gatewayHostOverride(); got != "0.0.0.0" {
-		t.Fatalf("gatewayHostOverride() = %q, want %q", got, "0.0.0.0")
+	if got := h.effectiveGatewayBindHost(cfg); got != "127.0.0.1" {
+		t.Fatalf("effectiveGatewayBindHost() = %q, want %q (public mode should not override)", got, "127.0.0.1")
 	}
 }
 
-func TestBuildWsURLUsesRequestHostWhenLauncherPublicSaved(t *testing.T) {
+func TestBuildWsURLUsesRequestHostWhenGatewayBindIsWildcard(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
-	launcherPath := launcherconfig.PathForAppConfig(configPath)
-	if err := launcherconfig.Save(launcherPath, launcherconfig.Config{
-		Port:   18800,
-		Public: true,
-	}); err != nil {
-		t.Fatalf("launcherconfig.Save() error = %v", err)
-	}
-
 	h := NewHandler(configPath)
 	h.SetServerOptions(18800, false, false, nil)
 
 	cfg := config.DefaultConfig()
-	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Host = "" // empty = wildcard, should use request host
 	cfg.Gateway.Port = 18790
 
 	req := httptest.NewRequest("GET", "http://launcher.local/api/pico/token", nil)
@@ -53,6 +43,23 @@ func TestBuildWsURLUsesRequestHostWhenLauncherPublicSaved(t *testing.T) {
 
 	if got := h.buildWsURL(req, cfg); got != "ws://192.168.1.9:18800/pico/ws" {
 		t.Fatalf("buildWsURL() = %q, want %q", got, "ws://192.168.1.9:18800/pico/ws")
+	}
+}
+
+func TestBuildWsURLUsesConfigHostWhenSet(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	h := NewHandler(configPath)
+	h.SetServerOptions(18800, false, false, nil)
+
+	cfg := config.DefaultConfig()
+	cfg.Gateway.Host = "10.0.0.5"
+	cfg.Gateway.Port = 18790
+
+	req := httptest.NewRequest("GET", "http://launcher.local/api/pico/token", nil)
+	req.Host = "192.168.1.9:18800"
+
+	if got := h.buildWsURL(req, cfg); got != "ws://10.0.0.5:18800/pico/ws" {
+		t.Fatalf("buildWsURL() = %q, want %q", got, "ws://10.0.0.5:18800/pico/ws")
 	}
 }
 
@@ -106,13 +113,13 @@ func TestGetGatewayHealthUsesConfiguredHost(t *testing.T) {
 	}
 }
 
-func TestGetGatewayHealthUsesProbeHostForPublicLauncher(t *testing.T) {
+func TestGetGatewayHealthUsesConfigHostForPublicLauncher(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	h := NewHandler(configPath)
 	h.SetServerOptions(18800, true, true, nil)
 
 	cfg := config.DefaultConfig()
-	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Host = "192.168.1.10"
 	cfg.Gateway.Port = 18791
 
 	originalHealthGet := gatewayHealthGet
@@ -130,8 +137,9 @@ func TestGetGatewayHealthUsesProbeHostForPublicLauncher(t *testing.T) {
 	_ = statusCode
 	_ = err
 
-	if requestedURL != "http://127.0.0.1:18791/health" {
-		t.Fatalf("health url = %q, want %q", requestedURL, "http://127.0.0.1:18791/health")
+	// Public mode no longer overrides the gateway host — config host is used directly.
+	if requestedURL != "http://192.168.1.10:18791/health" {
+		t.Fatalf("health url = %q, want %q", requestedURL, "http://192.168.1.10:18791/health")
 	}
 }
 
