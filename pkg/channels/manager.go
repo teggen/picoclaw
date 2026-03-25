@@ -405,7 +405,6 @@ func (m *Manager) initChannels(channels *config.ChannelsConfig) error {
 		m.initChannel("weixin", "Weixin")
 	}
 
-
 	if channels.Pico.Enabled && channels.Pico.Token() != "" {
 		m.initChannel("pico", "Pico")
 	}
@@ -755,7 +754,11 @@ func dispatchLoop[M any](
 					defer func() {
 						if r := recover(); r != nil {
 							// Queue was closed during reload; skip this message, not the whole loop.
-							logger.DebugCF("channels", "Worker queue closed during dispatch", map[string]any{"recover": fmt.Sprint(r)})
+							logger.DebugCF(
+								"channels",
+								"Worker queue closed during dispatch",
+								map[string]any{"recover": fmt.Sprint(r)},
+							)
 							ok = true // true = keep dispatching other channels
 						}
 					}()

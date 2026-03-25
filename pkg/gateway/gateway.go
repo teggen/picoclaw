@@ -253,7 +253,17 @@ func executeReload(
 	debug bool,
 ) error {
 	defer runningServices.reloading.Store(false)
-	return handleConfigReload(ctx, agentLoop, newCfg, provider, runningServices, msgBus, allowEmptyStartup, configPath, debug)
+	return handleConfigReload(
+		ctx,
+		agentLoop,
+		newCfg,
+		provider,
+		runningServices,
+		msgBus,
+		allowEmptyStartup,
+		configPath,
+		debug,
+	)
 }
 
 func createStartupProvider(
