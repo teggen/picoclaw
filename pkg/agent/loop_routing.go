@@ -157,7 +157,7 @@ func (al *AgentLoop) resolveSteeringTarget(msg bus.InboundMessage) (string, stri
 	return resolveScopeKey(route, msg.SessionKey), agent.ID, true
 }
 
-func (al *AgentLoop) requeueInboundMessage(msg bus.InboundMessage) error {
+func (al *AgentLoop) echoBackToUser(msg bus.InboundMessage) error {
 	if al.bus == nil {
 		return nil
 	}
@@ -405,9 +405,6 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance, opts *processOpt
 			}
 			return nil
 		},
-	}
-	if agent != nil && agent.ContextBuilder != nil {
-		rt.ListSkillNames = agent.ContextBuilder.ListSkillNames
 	}
 	rt.ReloadConfig = func() error {
 		if al.reloadFunc == nil {

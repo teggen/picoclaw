@@ -11,8 +11,33 @@ func TestEventHub_NewEventHub(t *testing.T) {
 	if eh == nil {
 		t.Fatal("expected non-nil EventHub")
 	}
-	if len(eh.clients) != 0 {
-		t.Fatal("expected empty clients")
+}
+
+func TestNewEventsUpgrader_DenyByDefault(t *testing.T) {
+	// With no allowed origins, browser requests (with Origin header) should be denied.
+	upgrader := newEventsUpgrader(nil)
+	r := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	r.Header.Set("Origin", "http://evil.com")
+	if upgrader.CheckOrigin(r) {
+		t.Fatal("expected deny when no origins configured")
+	}
+}
+
+func TestNewEventsUpgrader_AllowConfigured(t *testing.T) {
+	upgrader := newEventsUpgrader([]string{"http://localhost:3000"})
+	r := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	r.Header.Set("Origin", "http://localhost:3000")
+	if !upgrader.CheckOrigin(r) {
+		t.Fatal("expected allow for configured origin")
+	}
+}
+
+func TestNewEventsUpgrader_AllowNonBrowser(t *testing.T) {
+	// Requests without Origin header (non-browser) should be allowed.
+	upgrader := newEventsUpgrader(nil)
+	r := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	if !upgrader.CheckOrigin(r) {
+		t.Fatal("expected allow for non-browser client (no Origin header)")
 	}
 }
 

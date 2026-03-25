@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,9 +13,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/providers"
 )
+
+// writeJSON encodes v as JSON to w. If encoding fails, it sends a 500.
+func writeJSON(w http.ResponseWriter, v any) {
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		http.Error(w, `{"error":"internal encoding error"}`, http.StatusInternalServerError)
+	}
+}
 
 // handleStatus returns gateway status information.
 // GET /api/v1/status
@@ -24,7 +31,7 @@ func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	modelName := cfg.Agents.Defaults.ModelName
 
-	json.NewEncoder(w).Encode(map[string]any{
+	writeJSON(w, map[string]any{
 		"status":   "running",
 		"uptime":   time.Since(h.startTime).String(),
 		"model":    modelName,
@@ -46,7 +53,7 @@ func (h *Handler) handleChannels(w http.ResponseWriter, r *http.Request) {
 			"enabled": true,
 		})
 	}
-	json.NewEncoder(w).Encode(result)
+	writeJSON(w, result)
 }
 
 // handleAgents returns registered agents.
@@ -69,7 +76,7 @@ func (h *Handler) handleAgents(w http.ResponseWriter, r *http.Request) {
 			"max_tokens":     a.MaxTokens,
 		})
 	}
-	json.NewEncoder(w).Encode(agents)
+	writeJSON(w, agents)
 }
 
 // handleAgentByID returns a specific agent.
@@ -89,7 +96,7 @@ func (h *Handler) handleAgentByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	toolNames := a.Tools.List()
-	json.NewEncoder(w).Encode(map[string]any{
+	writeJSON(w, map[string]any{
 		"id":             a.ID,
 		"name":           a.Name,
 		"model":          a.Model,
@@ -106,7 +113,7 @@ func (h *Handler) handleTools(w http.ResponseWriter, r *http.Request) {
 	registry := h.agentLoop.GetRegistry()
 	agent := registry.GetDefaultAgent()
 	if agent == nil {
-		json.NewEncoder(w).Encode([]any{})
+		writeJSON(w, []any{})
 		return
 	}
 
@@ -119,7 +126,7 @@ func (h *Handler) handleTools(w http.ResponseWriter, r *http.Request) {
 			"parameters":  def.Function.Parameters,
 		})
 	}
-	json.NewEncoder(w).Encode(result)
+	writeJSON(w, result)
 }
 
 // Session types and helpers, mirroring web/backend/api/session.go patterns.
@@ -158,9 +165,9 @@ type sessionListItem struct {
 }
 
 func (h *Handler) sessionsDir() (string, error) {
-	cfg, err := config.LoadConfig(h.configPath)
-	if err != nil {
-		return "", err
+	cfg := h.agentLoop.GetConfig()
+	if cfg == nil {
+		return "", fmt.Errorf("config not available")
 	}
 
 	workspace := cfg.Agents.Defaults.Workspace
@@ -179,6 +186,17 @@ func (h *Handler) sessionsDir() (string, error) {
 	}
 
 	return filepath.Join(workspace, "sessions"), nil
+}
+
+// validSessionID returns true if the session ID contains only safe characters.
+func validSessionID(id string) bool {
+	for _, c := range id {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+			c == '-' || c == '_' || c == '.') {
+			return false
+		}
+	}
+	return len(id) > 0
 }
 
 func sanitizeSessionKey(key string) string {
@@ -354,7 +372,7 @@ func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		json.NewEncoder(w).Encode([]sessionListItem{})
+		writeJSON(w, []sessionListItem{})
 		return
 	}
 
@@ -429,15 +447,15 @@ func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		items = items[offset:end]
 	}
 
-	json.NewEncoder(w).Encode(items)
+	writeJSON(w, items)
 }
 
 // handleGetSession returns the full message history for a specific session.
 // GET /api/v1/sessions/{id}
 func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
-	if sessionID == "" {
-		http.Error(w, `{"error":"missing session id"}`, http.StatusBadRequest)
+	if sessionID == "" || !validSessionID(sessionID) {
+		http.Error(w, `{"error":"invalid session id"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -472,7 +490,7 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	json.NewEncoder(w).Encode(map[string]any{
+	writeJSON(w, map[string]any{
 		"id":       sessionID,
 		"messages": messages,
 		"summary":  sess.Summary,
@@ -485,8 +503,8 @@ func (h *Handler) handleGetSession(w http.ResponseWriter, r *http.Request) {
 // DELETE /api/v1/sessions/{id}
 func (h *Handler) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
-	if sessionID == "" {
-		http.Error(w, `{"error":"missing session id"}`, http.StatusBadRequest)
+	if sessionID == "" || !validSessionID(sessionID) {
+		http.Error(w, `{"error":"invalid session id"}`, http.StatusBadRequest)
 		return
 	}
 

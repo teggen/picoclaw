@@ -366,7 +366,10 @@ func setupAndStartServices(
 	}
 
 	// Create API handler for state/config/docs endpoints
-	apiHandler := picoapi.NewHandler(agentLoop, runningServices.ChannelManager, configPath)
+	apiHandler := picoapi.NewHandler(
+		agentLoop, runningServices.ChannelManager, configPath, cfg.Gateway.APIToken,
+		cfg.Channels.API.AllowOrigins...,
+	)
 
 	// Setup shared HTTP server with health endpoints, webhook handlers, and API routes
 	addr := fmt.Sprintf("%s:%d", cfg.Gateway.Host, cfg.Gateway.Port)
@@ -374,7 +377,7 @@ func setupAndStartServices(
 
 	extras := []func(*http.ServeMux){apiHandler.RegisterRoutes}
 	if cfg.Gateway.MetricsEnabled && metrics.DefaultCollector != nil {
-		metricsHandler := metrics.NewHandler(metrics.DefaultCollector)
+		metricsHandler := metrics.NewHandler(metrics.DefaultCollector, cfg.Gateway.APIToken)
 		extras = append(extras, metricsHandler.RegisterRoutes)
 	}
 	runningServices.ChannelManager.SetupHTTPServer(addr, runningServices.HealthServer, extras...)
@@ -584,7 +587,10 @@ func restartServices(
 	}
 
 	// Create API handler for state/config/docs endpoints
-	apiHandler := picoapi.NewHandler(al, runningServices.ChannelManager, configPath)
+	apiHandler := picoapi.NewHandler(
+		al, runningServices.ChannelManager, configPath, cfg.Gateway.APIToken,
+		cfg.Channels.API.AllowOrigins...,
+	)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Gateway.Host, cfg.Gateway.Port)
 	// Reuse existing HealthServer to preserve reloadFunc

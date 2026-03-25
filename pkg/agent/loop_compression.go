@@ -40,7 +40,9 @@ func (cm *compressionManager) maybeSummarize(agent *AgentInstance, sessionKey st
 	if len(newHistory) > agent.SummarizeMessageThreshold || tokenEstimate > threshold {
 		summarizeKey := agent.ID + ":" + sessionKey
 		if _, loading := cm.summarizing.LoadOrStore(summarizeKey, true); !loading {
+			cm.activeRequests.Add(1)
 			go func() {
+				defer cm.activeRequests.Done()
 				defer cm.summarizing.Delete(summarizeKey)
 				logger.Debug("Memory threshold reached. Optimizing conversation history...")
 				cm.summarizeSession(agent, sessionKey, turnScope)

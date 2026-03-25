@@ -320,7 +320,7 @@ func NewCodingAgentBackendFromConfig(cfg CodingAgentToolConfig) CodingAgentBacke
 		if cmd == "" {
 			cmd = "claude"
 		}
-		return NewClaudeCodeBackend(cmd, cfg.Model)
+		return NewClaudeCodeBackend(cmd, cfg.Model, cfg.SkipPermissions)
 	default:
 		fmt.Printf("Warning: unknown coding_agent backend %q, skipping\n", cfg.Backend)
 		return nil
@@ -341,4 +341,5 @@ type CodingAgentToolConfig struct {
 	AppendSystemPrompt string
 	Worktree           bool
 	Verbose            bool
+	SkipPermissions    bool // If true, pass --dangerously-skip-permissions to Claude Code CLI.
 }

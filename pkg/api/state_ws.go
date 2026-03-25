@@ -45,16 +45,65 @@ func (f *clientFilter) matches(eventType string, data any) bool {
 	return true
 }
 
+const (
+	eventsWriteBufSize = 64
+	eventsMaxReadSize  = 64 * 1024 // 64 KB
+)
+
+// eventClient wraps a WebSocket connection with a buffered write channel
+// to avoid concurrent writes on gorilla/websocket connections.
+type eventClient struct {
+	conn   *websocket.Conn
+	filter *clientFilter
+	send   chan []byte
+	done   chan struct{}
+}
+
+func newEventClient(conn *websocket.Conn, filter *clientFilter) *eventClient {
+	return &eventClient{
+		conn:   conn,
+		filter: filter,
+		send:   make(chan []byte, eventsWriteBufSize),
+		done:   make(chan struct{}),
+	}
+}
+
+// writePump drains the send channel and writes messages sequentially.
+func (ec *eventClient) writePump() {
+	defer ec.conn.Close()
+	for {
+		select {
+		case msg, ok := <-ec.send:
+			if !ok {
+				return
+			}
+			if err := ec.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				return
+			}
+		case <-ec.done:
+			return
+		}
+	}
+}
+
+func (ec *eventClient) close() {
+	select {
+	case <-ec.done:
+	default:
+		close(ec.done)
+	}
+}
+
 // EventHub broadcasts state change events to connected WebSocket subscribers.
 type EventHub struct {
 	mu      sync.RWMutex
-	clients map[*websocket.Conn]*clientFilter
+	clients map[*websocket.Conn]*eventClient
 }
 
 // NewEventHub creates a new event hub.
 func NewEventHub() *EventHub {
 	return &EventHub{
-		clients: make(map[*websocket.Conn]*clientFilter),
+		clients: make(map[*websocket.Conn]*eventClient),
 	}
 }
 
@@ -69,34 +118,57 @@ func (eh *EventHub) Broadcast(eventType string, data any) {
 		"timestamp": time.Now().UnixMilli(),
 	})
 
-	for conn, filter := range eh.clients {
-		if !filter.matches(eventType, data) {
+	for _, client := range eh.clients {
+		if !client.filter.matches(eventType, data) {
 			continue
 		}
-		if err := conn.WriteMessage(websocket.TextMessage, payload); err != nil {
-			logger.DebugCF("api", "Event broadcast write failed", map[string]any{
-				"error": err.Error(),
-			})
+		select {
+		case client.send <- payload:
+		default:
+			logger.DebugCF("api", "Event broadcast dropped (client buffer full)", nil)
 		}
 	}
 }
 
-func (eh *EventHub) addClient(conn *websocket.Conn, filter *clientFilter) {
+func (eh *EventHub) addClient(conn *websocket.Conn, filter *clientFilter) *eventClient {
+	ec := newEventClient(conn, filter)
 	eh.mu.Lock()
-	defer eh.mu.Unlock()
-	eh.clients[conn] = filter
+	eh.clients[conn] = ec
+	eh.mu.Unlock()
+	go ec.writePump()
+	return ec
 }
 
 func (eh *EventHub) removeClient(conn *websocket.Conn) {
 	eh.mu.Lock()
-	defer eh.mu.Unlock()
+	ec, ok := eh.clients[conn]
 	delete(eh.clients, conn)
+	eh.mu.Unlock()
+	if ok {
+		ec.close()
+	}
 }
 
-var eventsUpgrader = websocket.Upgrader{
-	CheckOrigin:     func(r *http.Request) bool { return true },
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
+func newEventsUpgrader(allowOrigins []string) websocket.Upgrader {
+	return websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				return true // non-browser clients (curl, CLI, etc.)
+			}
+			if len(allowOrigins) == 0 {
+				return false // deny browser requests when no origins configured
+			}
+			for _, allowed := range allowOrigins {
+				if allowed == "*" || allowed == origin {
+					return true
+				}
+			}
+			return false
+		},
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+	}
 }
 
 // parseClientFilter extracts filter parameters from query string.
@@ -119,19 +191,21 @@ func parseClientFilter(r *http.Request) *clientFilter {
 // handleEventsWS upgrades to WebSocket and streams real-time state change events.
 // GET /api/v1/events/ws
 func (h *Handler) handleEventsWS(w http.ResponseWriter, r *http.Request) {
-	conn, err := eventsUpgrader.Upgrade(w, r, nil)
+	upgrader := newEventsUpgrader(h.allowOrigins)
+	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		logger.ErrorCF("api", "Events WebSocket upgrade failed", map[string]any{
 			"error": err.Error(),
 		})
 		return
 	}
+	conn.SetReadLimit(eventsMaxReadSize)
 
 	filter := parseClientFilter(r)
-	h.eventHub.addClient(conn, filter)
+	ec := h.eventHub.addClient(conn, filter)
 	defer func() {
 		h.eventHub.removeClient(conn)
-		conn.Close()
+		ec.close()
 	}()
 
 	// Read loop — keeps the connection alive and detects disconnections.

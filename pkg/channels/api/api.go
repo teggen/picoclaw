@@ -69,10 +69,13 @@ func NewAPIChannel(cfg config.APIConfig, messageBus *bus.MessageBus) (*APIChanne
 
 	allowOrigins := cfg.AllowOrigins
 	checkOrigin := func(r *http.Request) bool {
-		if len(allowOrigins) == 0 {
-			return true
-		}
 		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true // non-browser clients
+		}
+		if len(allowOrigins) == 0 {
+			return false // deny by default when no origins configured
+		}
 		for _, allowed := range allowOrigins {
 			if allowed == "*" || allowed == origin {
 				return true
@@ -81,6 +84,7 @@ func NewAPIChannel(cfg config.APIConfig, messageBus *bus.MessageBus) (*APIChanne
 		return false
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	return &APIChannel{
 		BaseChannel: base,
 		config:      cfg,
@@ -89,12 +93,16 @@ func NewAPIChannel(cfg config.APIConfig, messageBus *bus.MessageBus) (*APIChanne
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
 		},
+		ctx:    ctx,
+		cancel: cancel,
 	}, nil
 }
 
 // Start implements Channel.
 func (c *APIChannel) Start(ctx context.Context) error {
 	logger.InfoC("api", "Starting API channel")
+	// Cancel the default background context and replace with the provided one.
+	c.cancel()
 	c.ctx, c.cancel = context.WithCancel(ctx)
 	c.SetRunning(true)
 	logger.InfoC("api", "API channel started")
@@ -258,7 +266,7 @@ func (c *APIChannel) setCORSHeaders(w http.ResponseWriter, r *http.Request) {
 
 	allowed := false
 	if len(c.config.AllowOrigins) == 0 {
-		allowed = true
+		allowed = false // deny by default when no origins configured
 	} else {
 		for _, o := range c.config.AllowOrigins {
 			if o == "*" || o == origin {
@@ -447,6 +455,7 @@ func (c *APIChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	conn.SetReadLimit(1 << 20) // 1 MB max message size
 
 	sessionID := r.URL.Query().Get("session_id")
 	if sessionID == "" {

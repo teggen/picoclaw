@@ -112,6 +112,7 @@ func NewAgentInstance(
 			AppendSystemPrompt: cfg.Tools.CodingAgent.AppendSystemPrompt,
 			Worktree:           cfg.Tools.CodingAgent.Worktree,
 			Verbose:            cfg.Tools.CodingAgent.Verbose,
+			SkipPermissions:    cfg.Tools.CodingAgent.SkipPermissions,
 		}
 		codingBackend := tools.NewCodingAgentBackendFromConfig(caCfg)
 		if codingBackend == nil {

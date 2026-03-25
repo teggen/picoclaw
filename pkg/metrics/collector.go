@@ -1,7 +1,6 @@
 package metrics
 
 import (
-	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -14,7 +13,6 @@ var DefaultCollector *Collector
 // Collector holds all Prometheus metrics for PicoClaw.
 type Collector struct {
 	registry *prometheus.Registry
-	mu       sync.RWMutex
 
 	toolCallsTotal      *prometheus.CounterVec
 	toolDuration        *prometheus.HistogramVec

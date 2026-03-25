@@ -555,7 +555,7 @@ func (al *AgentLoop) drainBusToSteering(ctx context.Context, activeScope, active
 
 		msgScope, _, scopeOK := al.resolveSteeringTarget(msg)
 		if !scopeOK || msgScope != activeScope {
-			if err := al.requeueInboundMessage(msg); err != nil {
+			if err := al.echoBackToUser(msg); err != nil {
 				logger.WarnCF("agent", "Failed to requeue non-steering inbound message", map[string]any{
 					"error":     err.Error(),
 					"channel":   msg.Channel,

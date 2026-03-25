@@ -19,7 +19,7 @@ func (h *Handler) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"failed to load config"}`, http.StatusInternalServerError)
 		return
 	}
-	json.NewEncoder(w).Encode(cfg)
+	writeJSON(w, cfg)
 }
 
 // handlePutConfig replaces the entire configuration.
@@ -49,7 +49,7 @@ func (h *Handler) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	writeJSON(w, map[string]string{"status": "ok"})
 }
 
 // handlePatchConfig partially updates the configuration using JSON merge patch.
@@ -109,7 +109,7 @@ func (h *Handler) handlePatchConfig(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	writeJSON(w, map[string]string{"status": "ok"})
 }
 
 // mergeMaps performs a recursive JSON merge patch (RFC 7396).

@@ -13,18 +13,20 @@ import (
 
 // ClaudeCodeBackend implements CodingAgentBackend using the Claude Code CLI.
 type ClaudeCodeBackend struct {
-	command      string
-	defaultModel string
+	command         string
+	defaultModel    string
+	skipPermissions bool
 }
 
 // NewClaudeCodeBackend creates a new Claude Code backend.
-func NewClaudeCodeBackend(command, defaultModel string) *ClaudeCodeBackend {
+func NewClaudeCodeBackend(command, defaultModel string, skipPermissions bool) *ClaudeCodeBackend {
 	if command == "" {
 		command = "claude"
 	}
 	return &ClaudeCodeBackend{
-		command:      command,
-		defaultModel: defaultModel,
+		command:         command,
+		defaultModel:    defaultModel,
+		skipPermissions: skipPermissions,
 	}
 }
 
@@ -38,7 +40,10 @@ func (b *ClaudeCodeBackend) Available() bool {
 }
 
 func (b *ClaudeCodeBackend) Execute(ctx context.Context, opts CodingAgentExecOpts) (*CodingAgentResult, error) {
-	args := []string{"-p", "--output-format", "json", "--dangerously-skip-permissions", "--no-chrome"}
+	args := []string{"-p", "--output-format", "json", "--no-chrome"}
+	if b.skipPermissions {
+		args = append(args, "--dangerously-skip-permissions")
+	}
 
 	// Session continuity: --resume takes precedence (continues existing session),
 	// --session-id creates/reuses a session with a specific UUID.

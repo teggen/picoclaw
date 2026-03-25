@@ -903,6 +903,7 @@ type GatewayConfig struct {
 	Port           int    `json:"port"            env:"PICOCLAW_GATEWAY_PORT"`
 	HotReload      bool   `json:"hot_reload"      env:"PICOCLAW_GATEWAY_HOT_RELOAD"`
 	MetricsEnabled bool   `json:"metrics_enabled" env:"PICOCLAW_GATEWAY_METRICS_ENABLED"`
+	APIToken       string `json:"api_token"       env:"PICOCLAW_GATEWAY_API_TOKEN"`
 }
 
 type LoggingConfig struct {
@@ -1146,6 +1147,7 @@ type CodingAgentConfig struct {
 	AppendSystemPrompt string `                                         json:"append_system_prompt" env:"PICOCLAW_TOOLS_CODING_AGENT_APPEND_SYSTEM_PROMPT"`
 	Worktree           bool   `                                         json:"worktree"             env:"PICOCLAW_TOOLS_CODING_AGENT_WORKTREE"`
 	Verbose            bool   `                                         json:"verbose"              env:"PICOCLAW_TOOLS_CODING_AGENT_VERBOSE"`
+	SkipPermissions    bool   `                                         json:"skip_permissions"     env:"PICOCLAW_TOOLS_CODING_AGENT_SKIP_PERMISSIONS"`
 }
 
 type ReadFileToolConfig struct {
