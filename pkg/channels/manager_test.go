@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/time/rate"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
@@ -1399,6 +1401,7 @@ func (r *reloadMockChannel) Stop(ctx context.Context) error {
 	r.stopped.Store(true)
 	return nil
 }
+
 func (r *reloadMockChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	if r.sendFn != nil {
 		return r.sendFn(ctx, msg)
@@ -1605,9 +1608,9 @@ func TestStartAllAndStopAll(t *testing.T) {
 	}
 	// Override Start/Stop tracking by using a wrapper
 	trackCh := &trackingChannel{
-		Channel:   ch,
-		onStart:   func() { started.Add(1) },
-		onStop:    func() { stopped.Add(1) },
+		Channel: ch,
+		onStart: func() { started.Add(1) },
+		onStop:  func() { stopped.Add(1) },
 	}
 
 	m := &Manager{
@@ -1895,8 +1898,45 @@ type mockWebhookChannel struct {
 	webhookPath string
 }
 
-func (m *mockWebhookChannel) WebhookPath() string { return m.webhookPath }
+func (m *mockWebhookChannel) WebhookPath() string                              { return m.webhookPath }
 func (m *mockWebhookChannel) ServeHTTP(w http.ResponseWriter, r *http.Request) {}
+
+// mockStreamer is a test double for bus.Streamer.
+type mockStreamer struct {
+	updateFn   func(ctx context.Context, content string) error
+	finalizeFn func(ctx context.Context, content string) error
+	cancelFn   func(ctx context.Context)
+}
+
+func (s *mockStreamer) Update(ctx context.Context, content string) error {
+	if s.updateFn != nil {
+		return s.updateFn(ctx, content)
+	}
+	return nil
+}
+
+func (s *mockStreamer) Finalize(ctx context.Context, content string) error {
+	if s.finalizeFn != nil {
+		return s.finalizeFn(ctx, content)
+	}
+	return nil
+}
+
+func (s *mockStreamer) Cancel(ctx context.Context) {
+	if s.cancelFn != nil {
+		s.cancelFn(ctx)
+	}
+}
+
+// mockStreamingChannel embeds mockChannel and implements StreamingCapable.
+type mockStreamingChannel struct {
+	mockChannel
+	beginStreamFn func(ctx context.Context, chatID string) (Streamer, error)
+}
+
+func (m *mockStreamingChannel) BeginStream(ctx context.Context, chatID string) (Streamer, error) {
+	return m.beginStreamFn(ctx, chatID)
+}
 
 func TestHiddenValuesCorrectMapping(t *testing.T) {
 	cfg := config.DefaultConfig()
@@ -1944,4 +1984,305 @@ func TestHiddenValuesCorrectMapping(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Section 1: GetStreamer & finalizeHookStreamer
+// ---------------------------------------------------------------------------
+
+func TestGetStreamer_ChannelNotFound(t *testing.T) {
+	m := newTestManager()
+	s, ok := m.GetStreamer(context.Background(), "nonexistent", "chat1")
+	assert.Nil(t, s)
+	assert.False(t, ok)
+}
+
+func TestGetStreamer_NotStreamingCapable(t *testing.T) {
+	m := newTestManager()
+	ch := &mockChannel{sendFn: func(_ context.Context, _ bus.OutboundMessage) error { return nil }}
+	m.channels["test"] = ch
+	s, ok := m.GetStreamer(context.Background(), "test", "chat1")
+	assert.Nil(t, s)
+	assert.False(t, ok)
+}
+
+func TestGetStreamer_BeginStreamError(t *testing.T) {
+	m := newTestManager()
+	ch := &mockStreamingChannel{
+		mockChannel: mockChannel{sendFn: func(_ context.Context, _ bus.OutboundMessage) error { return nil }},
+		beginStreamFn: func(_ context.Context, _ string) (Streamer, error) {
+			return nil, errors.New("stream unavailable")
+		},
+	}
+	m.channels["test"] = ch
+	s, ok := m.GetStreamer(context.Background(), "test", "chat1")
+	assert.Nil(t, s)
+	assert.False(t, ok)
+}
+
+func TestGetStreamer_Success(t *testing.T) {
+	m := newTestManager()
+	ms := &mockStreamer{}
+	ch := &mockStreamingChannel{
+		mockChannel: mockChannel{sendFn: func(_ context.Context, _ bus.OutboundMessage) error { return nil }},
+		beginStreamFn: func(_ context.Context, _ string) (Streamer, error) {
+			return ms, nil
+		},
+	}
+	m.channels["test"] = ch
+	s, ok := m.GetStreamer(context.Background(), "test", "chat1")
+	require.True(t, ok)
+	require.NotNil(t, s)
+}
+
+func TestGetStreamer_FinalizeMarksStreamActive(t *testing.T) {
+	m := newTestManager()
+	ms := &mockStreamer{}
+	ch := &mockStreamingChannel{
+		mockChannel: mockChannel{sendFn: func(_ context.Context, _ bus.OutboundMessage) error { return nil }},
+		beginStreamFn: func(_ context.Context, _ string) (Streamer, error) {
+			return ms, nil
+		},
+	}
+	m.channels["test"] = ch
+
+	s, ok := m.GetStreamer(context.Background(), "test", "chat1")
+	require.True(t, ok)
+
+	// Before Finalize, streamActive should not be set
+	_, loaded := m.streamActive.Load("test:chat1")
+	assert.False(t, loaded)
+
+	// Finalize should mark streamActive
+	err := s.Finalize(context.Background(), "final content")
+	require.NoError(t, err)
+	val, loaded := m.streamActive.Load("test:chat1")
+	assert.True(t, loaded)
+	assert.Equal(t, true, val)
+}
+
+func TestGetStreamer_FinalizeError_NoStreamActive(t *testing.T) {
+	m := newTestManager()
+	ms := &mockStreamer{
+		finalizeFn: func(_ context.Context, _ string) error {
+			return errors.New("finalize failed")
+		},
+	}
+	ch := &mockStreamingChannel{
+		mockChannel: mockChannel{sendFn: func(_ context.Context, _ bus.OutboundMessage) error { return nil }},
+		beginStreamFn: func(_ context.Context, _ string) (Streamer, error) {
+			return ms, nil
+		},
+	}
+	m.channels["test"] = ch
+
+	s, ok := m.GetStreamer(context.Background(), "test", "chat1")
+	require.True(t, ok)
+
+	err := s.Finalize(context.Background(), "content")
+	assert.Error(t, err)
+	_, loaded := m.streamActive.Load("test:chat1")
+	assert.False(t, loaded)
+}
+
+// ---------------------------------------------------------------------------
+// Section 2: SendToChannel
+// ---------------------------------------------------------------------------
+
+func TestSendToChannel_ChannelNotFound(t *testing.T) {
+	m := newTestManager()
+	err := m.SendToChannel(context.Background(), "nonexistent", "chat1", "hello")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestSendToChannel_WithWorker(t *testing.T) {
+	m := newTestManager()
+	ch := &mockChannel{sendFn: func(_ context.Context, _ bus.OutboundMessage) error { return nil }}
+	m.channels["test"] = ch
+	w := &channelWorker{
+		ch:         ch,
+		queue:      make(chan bus.OutboundMessage, 10),
+		mediaQueue: make(chan bus.OutboundMediaMessage, 10),
+		done:       make(chan struct{}),
+		mediaDone:  make(chan struct{}),
+		limiter:    rate.NewLimiter(rate.Inf, 1),
+	}
+	m.workers["test"] = w
+
+	err := m.SendToChannel(context.Background(), "test", "chat1", "hello")
+	require.NoError(t, err)
+
+	// Verify message was enqueued
+	select {
+	case msg := <-w.queue:
+		assert.Equal(t, "test", msg.Channel)
+		assert.Equal(t, "chat1", msg.ChatID)
+		assert.Equal(t, "hello", msg.Content)
+	default:
+		t.Fatal("expected message in worker queue")
+	}
+}
+
+func TestSendToChannel_NoWorker_FallbackSend(t *testing.T) {
+	m := newTestManager()
+	var sent bus.OutboundMessage
+	ch := &mockChannel{sendFn: func(_ context.Context, msg bus.OutboundMessage) error {
+		sent = msg
+		return nil
+	}}
+	m.channels["test"] = ch
+	// No worker registered
+
+	err := m.SendToChannel(context.Background(), "test", "chat1", "hello")
+	require.NoError(t, err)
+	assert.Equal(t, "hello", sent.Content)
+}
+
+func TestSendToChannel_ContextCanceled(t *testing.T) {
+	m := newTestManager()
+	ch := &mockChannel{sendFn: func(_ context.Context, _ bus.OutboundMessage) error { return nil }}
+	m.channels["test"] = ch
+	// Create a worker with an unbuffered queue (will block)
+	w := &channelWorker{
+		ch:         ch,
+		queue:      make(chan bus.OutboundMessage), // unbuffered = full
+		mediaQueue: make(chan bus.OutboundMediaMessage, 10),
+		done:       make(chan struct{}),
+		mediaDone:  make(chan struct{}),
+		limiter:    rate.NewLimiter(rate.Inf, 1),
+	}
+	m.workers["test"] = w
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	err := m.SendToChannel(ctx, "test", "chat1", "hello")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
+// ---------------------------------------------------------------------------
+// Section 3: TTL Janitor - reaction eviction + context cancellation
+// ---------------------------------------------------------------------------
+
+func TestReactionUndoJanitorEviction(t *testing.T) {
+	m := newTestManager()
+
+	var undoCalled atomic.Bool
+
+	// Store a reaction entry with a timestamp far in the past (exceeding typingStopTTL)
+	m.reactionUndos.Store("test:chat1", reactionEntry{
+		undo:      func() { undoCalled.Store(true) },
+		createdAt: time.Now().Add(-10 * time.Minute), // well past 5m TTL
+	})
+
+	// Manually trigger the janitor logic once by simulating a tick
+	// (same pattern as TestTypingStopJanitorEviction)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	go func() {
+		now := time.Now()
+		m.reactionUndos.Range(func(key, value any) bool {
+			if entry, ok := value.(reactionEntry); ok {
+				if now.Sub(entry.createdAt) > typingStopTTL {
+					if _, loaded := m.reactionUndos.LoadAndDelete(key); loaded {
+						entry.undo()
+					}
+				}
+			}
+			return true
+		})
+		cancel()
+	}()
+
+	<-ctx.Done()
+
+	assert.True(t, undoCalled.Load(), "expired reaction undo should have been called")
+	_, exists := m.reactionUndos.Load("test:chat1")
+	assert.False(t, exists, "expired reaction entry should have been removed")
+}
+
+func TestJanitorRespectsContextCancellation(t *testing.T) {
+	m := newTestManager()
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		m.runTTLJanitor(ctx)
+		close(done)
+	}()
+
+	cancel()
+
+	select {
+	case <-done:
+		// success - janitor exited
+	case <-time.After(2 * time.Second):
+		t.Fatal("janitor did not exit after context cancellation")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Section 4: GetChannel, GetStatus, GetEnabledChannels
+// ---------------------------------------------------------------------------
+
+func TestGetChannel_Found(t *testing.T) {
+	m := newTestManager()
+	ch := &mockChannel{sendFn: func(_ context.Context, _ bus.OutboundMessage) error { return nil }}
+	m.channels["test"] = ch
+
+	got, ok := m.GetChannel("test")
+	assert.True(t, ok)
+	assert.Equal(t, ch, got)
+}
+
+func TestGetChannel_NotFound(t *testing.T) {
+	m := newTestManager()
+	got, ok := m.GetChannel("nonexistent")
+	assert.False(t, ok)
+	assert.Nil(t, got)
+}
+
+func TestGetStatus_Empty(t *testing.T) {
+	m := newTestManager()
+	status := m.GetStatus()
+	assert.Empty(t, status)
+}
+
+func TestGetStatus_WithChannels(t *testing.T) {
+	m := newTestManager()
+	ch1 := &mockChannel{sendFn: func(_ context.Context, _ bus.OutboundMessage) error { return nil }}
+	ch1.SetRunning(true)
+	ch2 := &mockChannel{sendFn: func(_ context.Context, _ bus.OutboundMessage) error { return nil }}
+	ch2.SetRunning(false)
+	m.channels["running"] = ch1
+	m.channels["stopped"] = ch2
+
+	status := m.GetStatus()
+	require.Len(t, status, 2)
+
+	runningStatus := status["running"].(map[string]any)
+	assert.Equal(t, true, runningStatus["enabled"])
+	assert.Equal(t, true, runningStatus["running"])
+
+	stoppedStatus := status["stopped"].(map[string]any)
+	assert.Equal(t, true, stoppedStatus["enabled"])
+	assert.Equal(t, false, stoppedStatus["running"])
+}
+
+func TestGetEnabledChannels_Empty(t *testing.T) {
+	m := newTestManager()
+	names := m.GetEnabledChannels()
+	assert.Empty(t, names)
+}
+
+func TestGetEnabledChannels_Multiple(t *testing.T) {
+	m := newTestManager()
+	m.channels["alpha"] = &mockChannel{sendFn: func(_ context.Context, _ bus.OutboundMessage) error { return nil }}
+	m.channels["beta"] = &mockChannel{sendFn: func(_ context.Context, _ bus.OutboundMessage) error { return nil }}
+
+	names := m.GetEnabledChannels()
+	assert.Len(t, names, 2)
+	assert.ElementsMatch(t, []string{"alpha", "beta"}, names)
 }
