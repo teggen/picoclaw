@@ -35,7 +35,7 @@ func (al *AgentLoop) runAgentLoop(
 		}
 	}
 
-	ts := newTurnState(agent, opts, al.newTurnEventScope(agent.ID, opts.SessionKey))
+	ts := newTurnState(agent, opts, al.events.newTurnEventScope(agent.ID, opts.SessionKey))
 	result, err := al.runTurn(ctx, ts)
 	if err != nil {
 		return "", err
@@ -146,7 +146,7 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState) (turnResult, er
 
 	turnStatus := TurnEndStatusCompleted
 	defer func() {
-		al.emitEvent(
+		al.events.emitEvent(
 			EventKindTurnEnd,
 			ts.eventMeta("runTurn", "turn.end"),
 			TurnEndPayload{
@@ -158,7 +158,7 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState) (turnResult, er
 		)
 	}()
 
-	al.emitEvent(
+	al.events.emitEvent(
 		EventKindTurnStart,
 		ts.eventMeta("runTurn", "turn.start"),
 		TurnStartPayload{
@@ -198,8 +198,8 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState) (turnResult, er
 		if isOverContextBudget(ts.agent.ContextWindow, messages, toolDefs, ts.agent.MaxTokens) {
 			logger.WarnCF("agent", "Proactive compression: context budget exceeded before LLM call",
 				map[string]any{"session_key": ts.sessionKey})
-			if compression, ok := al.forceCompression(ts.agent, ts.sessionKey); ok {
-				al.emitEvent(
+			if compression, ok := al.compression.forceCompression(ts.agent, ts.sessionKey); ok {
+				al.events.emitEvent(
 					EventKindContextCompress,
 					ts.eventMeta("runTurn", "turn.context.compress"),
 					ContextCompressPayload{
@@ -315,7 +315,7 @@ turnLoop:
 						"media_count": len(pm.Media),
 					})
 			}
-			al.emitEvent(
+			al.events.emitEvent(
 				EventKindSteeringInjected,
 				ts.eventMeta("runTurn", "turn.steering.injected"),
 				SteeringInjectedPayload{
@@ -413,7 +413,7 @@ turnLoop:
 			}
 		}
 
-		al.emitEvent(
+		al.events.emitEvent(
 			EventKindLLMRequest,
 			ts.eventMeta("runTurn", "turn.llm.request"),
 			LLMRequestPayload{
@@ -510,7 +510,7 @@ turnLoop:
 
 			if isTimeoutError && retry < maxRetries {
 				backoff := time.Duration(retry+1) * 5 * time.Second
-				al.emitEvent(
+				al.events.emitEvent(
 					EventKindLLMRetry,
 					ts.eventMeta("runTurn", "turn.llm.retry"),
 					LLMRetryPayload{
@@ -538,7 +538,7 @@ turnLoop:
 			}
 
 			if isContextError && retry < maxRetries && !ts.opts.NoHistory {
-				al.emitEvent(
+				al.events.emitEvent(
 					EventKindLLMRetry,
 					ts.eventMeta("runTurn", "turn.llm.retry"),
 					LLMRetryPayload{
@@ -565,8 +565,8 @@ turnLoop:
 					})
 				}
 
-				if compression, ok := al.forceCompression(ts.agent, ts.sessionKey); ok {
-					al.emitEvent(
+				if compression, ok := al.compression.forceCompression(ts.agent, ts.sessionKey); ok {
+					al.events.emitEvent(
 						EventKindContextCompress,
 						ts.eventMeta("runTurn", "turn.context.compress"),
 						ContextCompressPayload{
@@ -596,7 +596,7 @@ turnLoop:
 
 		if err != nil {
 			turnStatus = TurnEndStatusError
-			al.emitEvent(
+			al.events.emitEvent(
 				EventKindError,
 				ts.eventMeta("runTurn", "turn.error"),
 				ErrorPayload{
@@ -656,7 +656,7 @@ turnLoop:
 			ts.channel,
 			al.targetReasoningChannelID(ts.channel),
 		)
-		al.emitEvent(
+		al.events.emitEvent(
 			EventKindLLMResponse,
 			ts.eventMeta("runTurn", "turn.llm.response"),
 			LLMResponsePayload{
@@ -778,7 +778,7 @@ turnLoop:
 				case HookActionDenyTool:
 					allResponsesHandled = false
 					denyContent := hookDeniedToolContent("Tool execution denied by hook", decision.Reason)
-					al.emitEvent(
+					al.events.emitEvent(
 						EventKindToolExecSkipped,
 						ts.eventMeta("runTurn", "turn.tool.skipped"),
 						ToolExecSkippedPayload{
@@ -818,7 +818,7 @@ turnLoop:
 				if !approval.Approved {
 					allResponsesHandled = false
 					denyContent := hookDeniedToolContent("Tool execution denied by approval hook", approval.Reason)
-					al.emitEvent(
+					al.events.emitEvent(
 						EventKindToolExecSkipped,
 						ts.eventMeta("runTurn", "turn.tool.skipped"),
 						ToolExecSkippedPayload{
@@ -848,7 +848,7 @@ turnLoop:
 					"tool":      toolName,
 					"iteration": iteration,
 				})
-			al.emitEvent(
+			al.events.emitEvent(
 				EventKindToolExecStart,
 				ts.eventMeta("runTurn", "turn.tool.start"),
 				ToolExecStartPayload{
@@ -904,7 +904,7 @@ turnLoop:
 						"content_len": len(content),
 						"channel":     ts.channel,
 					})
-				al.emitEvent(
+				al.events.emitEvent(
 					EventKindFollowUpQueued,
 					ts.scope.meta(toolIteration, "runTurn", "turn.follow_up.queued"),
 					FollowUpQueuedPayload{
@@ -1044,7 +1044,7 @@ turnLoop:
 				Content:    contentForLLM,
 				ToolCallID: toolCallID,
 			}
-			al.emitEvent(
+			al.events.emitEvent(
 				EventKindToolExecEnd,
 				ts.eventMeta("runTurn", "turn.tool.end"),
 				ToolExecEndPayload{
@@ -1088,7 +1088,7 @@ turnLoop:
 						})
 					for j := i + 1; j < len(normalizedToolCalls); j++ {
 						skippedTC := normalizedToolCalls[j]
-						al.emitEvent(
+						al.events.emitEvent(
 							EventKindToolExecSkipped,
 							ts.eventMeta("runTurn", "turn.tool.skipped"),
 							ToolExecSkippedPayload{
@@ -1161,7 +1161,7 @@ turnLoop:
 				ts.recordPersistedMessage(summaryMsg)
 				if err := ts.agent.Sessions.Save(ts.sessionKey); err != nil {
 					turnStatus = TurnEndStatusError
-					al.emitEvent(
+					al.events.emitEvent(
 						EventKindError,
 						ts.eventMeta("runTurn", "turn.error"),
 						ErrorPayload{
@@ -1173,7 +1173,7 @@ turnLoop:
 				}
 			}
 			if ts.opts.EnableSummary {
-				al.maybeSummarize(ts.agent, ts.sessionKey, ts.scope)
+				al.compression.maybeSummarize(ts.agent, ts.sessionKey, ts.scope)
 			}
 
 			ts.setPhase(TurnPhaseCompleted)
@@ -1230,7 +1230,7 @@ turnLoop:
 		ts.recordPersistedMessage(finalMsg)
 		if err := ts.agent.Sessions.Save(ts.sessionKey); err != nil {
 			turnStatus = TurnEndStatusError
-			al.emitEvent(
+			al.events.emitEvent(
 				EventKindError,
 				ts.eventMeta("runTurn", "turn.error"),
 				ErrorPayload{
@@ -1243,7 +1243,7 @@ turnLoop:
 	}
 
 	if ts.opts.EnableSummary {
-		al.maybeSummarize(ts.agent, ts.sessionKey, ts.scope)
+		al.compression.maybeSummarize(ts.agent, ts.sessionKey, ts.scope)
 	}
 
 	ts.setPhase(TurnPhaseCompleted)
@@ -1258,7 +1258,7 @@ func (al *AgentLoop) abortTurn(ts *turnState) (turnResult, error) {
 	ts.setPhase(TurnPhaseAborted)
 	if !ts.opts.NoHistory {
 		if err := ts.restoreSession(ts.agent); err != nil {
-			al.emitEvent(
+			al.events.emitEvent(
 				EventKindError,
 				ts.eventMeta("abortTurn", "turn.error"),
 				ErrorPayload{
@@ -1321,6 +1321,7 @@ func (al *AgentLoop) selectCandidates(
 		})
 	return agent.LightCandidates, resolvedCandidateModel(agent.LightCandidates, agent.Router.LightModel())
 }
+
 func isNativeSearchProvider(p providers.LLMProvider) bool {
 	if ns, ok := p.(providers.NativeSearchCapable); ok {
 		return ns.SupportsNativeSearch()

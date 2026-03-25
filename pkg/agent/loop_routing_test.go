@@ -257,7 +257,7 @@ func TestApplyExplicitSkillCommand_ArmsSkillForNextMessage(t *testing.T) {
 		t.Fatalf("unexpected reply: %q", reply)
 	}
 
-	pending := al.takePendingSkills(opts.SessionKey)
+	pending := al.routing.takePendingSkills(opts.SessionKey)
 	if len(pending) != 1 || pending[0] != "finance-news" {
 		t.Fatalf("pending skills = %#v, want [finance-news]", pending)
 	}
@@ -304,9 +304,6 @@ func TestApplyExplicitSkillCommand_InlineMessageMutatesOptions(t *testing.T) {
 		t.Fatalf("opts.ForcedSkills = %#v, want [finance-news]", opts.ForcedSkills)
 	}
 }
-
-
-
 
 // TestAgentLoop_GetStartupInfo verifies startup info contains tools
 func TestProcessMessage_UsesRouteSessionKey(t *testing.T) {

@@ -1,4 +1,6 @@
-// loop_events.go contains event emission, hook management, and event logging for AgentLoop.
+// loop_events.go contains the eventSystem type and event-related methods for AgentLoop.
+// The eventSystem owns event emission, subscription, and broadcasting state.
+// Hook management remains on AgentLoop due to tight coupling with config loading.
 
 // PicoClaw - Ultra-lightweight personal AI agent
 // Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
@@ -10,68 +12,44 @@ package agent
 
 import (
 	"fmt"
+	"sync"
+	"sync/atomic"
 
 	"github.com/sipeed/picoclaw/pkg/events"
 	"github.com/sipeed/picoclaw/pkg/logger"
 )
 
-// MountHook registers an in-process hook on the agent loop.
-func (al *AgentLoop) MountHook(reg HookRegistration) error {
-	if al == nil || al.hooks == nil {
-		return fmt.Errorf("hook manager is not initialized")
-	}
-	return al.hooks.Mount(reg)
+// eventSystem encapsulates event emission, subscription, and broadcasting state.
+type eventSystem struct {
+	eventBus         *EventBus
+	eventBroadcaster events.Broadcaster
+	turnSeq          atomic.Uint64
+	mu               sync.RWMutex
 }
 
-// UnmountHook removes a previously registered in-process hook.
-func (al *AgentLoop) UnmountHook(name string) {
-	if al == nil || al.hooks == nil {
+func newEventSystem(eventBus *EventBus) *eventSystem {
+	return &eventSystem{
+		eventBus: eventBus,
+	}
+}
+
+func (es *eventSystem) emitEvent(kind EventKind, meta EventMeta, payload any) {
+	evt := Event{
+		Kind:    kind,
+		Meta:    meta,
+		Payload: payload,
+	}
+
+	if es == nil || es.eventBus == nil {
 		return
 	}
-	al.hooks.Unmount(name)
+
+	es.logEvent(evt)
+	es.eventBus.Emit(evt)
 }
 
-// SetEventBroadcaster sets the event broadcaster for emitting lifecycle events.
-func (al *AgentLoop) SetEventBroadcaster(b events.Broadcaster) {
-	al.mu.Lock()
-	defer al.mu.Unlock()
-	al.eventBroadcaster = b
-}
-
-// SubscribeEvents registers a subscriber for agent-loop events.
-func (al *AgentLoop) SubscribeEvents(buffer int) EventSubscription {
-	if al == nil || al.eventBus == nil {
-		ch := make(chan Event)
-		close(ch)
-		return EventSubscription{C: ch}
-	}
-	return al.eventBus.Subscribe(buffer)
-}
-
-// UnsubscribeEvents removes a previously registered event subscriber.
-func (al *AgentLoop) UnsubscribeEvents(id uint64) {
-	if al == nil || al.eventBus == nil {
-		return
-	}
-	al.eventBus.Unsubscribe(id)
-}
-
-// EventDrops returns the number of dropped events for the given kind.
-func (al *AgentLoop) EventDrops(kind EventKind) int64 {
-	if al == nil || al.eventBus == nil {
-		return 0
-	}
-	return al.eventBus.Dropped(kind)
-}
-
-type turnEventScope struct {
-	agentID    string
-	sessionKey string
-	turnID     string
-}
-
-func (al *AgentLoop) newTurnEventScope(agentID, sessionKey string) turnEventScope {
-	seq := al.turnSeq.Add(1)
+func (es *eventSystem) newTurnEventScope(agentID, sessionKey string) turnEventScope {
+	seq := es.turnSeq.Add(1)
 	return turnEventScope{
 		agentID:    agentID,
 		sessionKey: sessionKey,
@@ -79,71 +57,42 @@ func (al *AgentLoop) newTurnEventScope(agentID, sessionKey string) turnEventScop
 	}
 }
 
-func (ts turnEventScope) meta(iteration int, source, tracePath string) EventMeta {
-	return EventMeta{
-		AgentID:    ts.agentID,
-		TurnID:     ts.turnID,
-		SessionKey: ts.sessionKey,
-		Iteration:  iteration,
-		Source:     source,
-		TracePath:  tracePath,
+func (es *eventSystem) subscribe(buffer int) EventSubscription {
+	if es == nil || es.eventBus == nil {
+		ch := make(chan Event)
+		close(ch)
+		return EventSubscription{C: ch}
 	}
+	return es.eventBus.Subscribe(buffer)
 }
 
-func (al *AgentLoop) emitEvent(kind EventKind, meta EventMeta, payload any) {
-	evt := Event{
-		Kind:    kind,
-		Meta:    meta,
-		Payload: payload,
-	}
-
-	if al == nil || al.eventBus == nil {
+func (es *eventSystem) unsubscribe(id uint64) {
+	if es == nil || es.eventBus == nil {
 		return
 	}
-
-	al.logEvent(evt)
-
-	al.eventBus.Emit(evt)
+	es.eventBus.Unsubscribe(id)
 }
 
-func cloneEventArguments(args map[string]any) map[string]any {
-	if len(args) == 0 {
-		return nil
+func (es *eventSystem) dropped(kind EventKind) int64 {
+	if es == nil || es.eventBus == nil {
+		return 0
 	}
-
-	cloned := make(map[string]any, len(args))
-	for k, v := range args {
-		cloned[k] = v
-	}
-	return cloned
+	return es.eventBus.Dropped(kind)
 }
 
-func (al *AgentLoop) hookAbortError(ts *turnState, stage string, decision HookDecision) error {
-	reason := decision.Reason
-	if reason == "" {
-		reason = "hook requested turn abort"
-	}
-
-	err := fmt.Errorf("hook aborted turn during %s: %s", stage, reason)
-	al.emitEvent(
-		EventKindError,
-		ts.eventMeta("hooks", "turn.error"),
-		ErrorPayload{
-			Stage:   "hook." + stage,
-			Message: err.Error(),
-		},
-	)
-	return err
+func (es *eventSystem) setBroadcaster(b events.Broadcaster) {
+	es.mu.Lock()
+	defer es.mu.Unlock()
+	es.eventBroadcaster = b
 }
 
-func hookDeniedToolContent(prefix, reason string) string {
-	if reason == "" {
-		return prefix
+func (es *eventSystem) close() {
+	if es != nil && es.eventBus != nil {
+		es.eventBus.Close()
 	}
-	return prefix + ": " + reason
 }
 
-func (al *AgentLoop) logEvent(evt Event) {
+func (es *eventSystem) logEvent(evt Event) {
 	fields := map[string]any{
 		"event_kind":  evt.Kind.String(),
 		"agent_id":    evt.Meta.AgentID,
@@ -240,4 +189,112 @@ func (al *AgentLoop) logEvent(evt Event) {
 	}
 
 	logger.InfoCF("eventbus", fmt.Sprintf("Agent event: %s", evt.Kind.String()), fields)
+}
+
+// --- turnEventScope (unchanged, used across files) ---
+
+type turnEventScope struct {
+	agentID    string
+	sessionKey string
+	turnID     string
+}
+
+func (ts turnEventScope) meta(iteration int, source, tracePath string) EventMeta {
+	return EventMeta{
+		AgentID:    ts.agentID,
+		TurnID:     ts.turnID,
+		SessionKey: ts.sessionKey,
+		Iteration:  iteration,
+		Source:     source,
+		TracePath:  tracePath,
+	}
+}
+
+// --- Standalone helpers (unchanged) ---
+
+func cloneEventArguments(args map[string]any) map[string]any {
+	if len(args) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]any, len(args))
+	for k, v := range args {
+		cloned[k] = v
+	}
+	return cloned
+}
+
+func hookDeniedToolContent(prefix, reason string) string {
+	if reason == "" {
+		return prefix
+	}
+	return prefix + ": " + reason
+}
+
+// --- AgentLoop delegation methods (public API preserved) ---
+
+// MountHook registers an in-process hook on the agent loop.
+func (al *AgentLoop) MountHook(reg HookRegistration) error {
+	if al == nil || al.hooks == nil {
+		return fmt.Errorf("hook manager is not initialized")
+	}
+	return al.hooks.Mount(reg)
+}
+
+// UnmountHook removes a previously registered in-process hook.
+func (al *AgentLoop) UnmountHook(name string) {
+	if al == nil || al.hooks == nil {
+		return
+	}
+	al.hooks.Unmount(name)
+}
+
+// SetEventBroadcaster sets the event broadcaster for emitting lifecycle events.
+func (al *AgentLoop) SetEventBroadcaster(b events.Broadcaster) {
+	al.events.setBroadcaster(b)
+}
+
+// SubscribeEvents registers a subscriber for agent-loop events.
+func (al *AgentLoop) SubscribeEvents(buffer int) EventSubscription {
+	if al == nil {
+		ch := make(chan Event)
+		close(ch)
+		return EventSubscription{C: ch}
+	}
+	return al.events.subscribe(buffer)
+}
+
+// UnsubscribeEvents removes a previously registered event subscriber.
+func (al *AgentLoop) UnsubscribeEvents(id uint64) {
+	if al == nil {
+		return
+	}
+	al.events.unsubscribe(id)
+}
+
+// EventDrops returns the number of dropped events for the given kind.
+func (al *AgentLoop) EventDrops(kind EventKind) int64 {
+	if al == nil {
+		return 0
+	}
+	return al.events.dropped(kind)
+}
+
+// hookAbortError emits an error event and returns an error for a hook-aborted turn.
+func (al *AgentLoop) hookAbortError(ts *turnState, stage string, decision HookDecision) error {
+	reason := decision.Reason
+	if reason == "" {
+		reason = "hook requested turn abort"
+	}
+
+	err := fmt.Errorf("hook aborted turn during %s: %s", stage, reason)
+	al.events.emitEvent(
+		EventKindError,
+		ts.eventMeta("hooks", "turn.error"),
+		ErrorPayload{
+			Stage:   "hook." + stage,
+			Message: err.Error(),
+		},
+	)
+	return err
 }

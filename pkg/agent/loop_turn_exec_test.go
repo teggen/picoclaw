@@ -66,6 +66,7 @@ func (m *reasoningContentProvider) Chat(
 func (m *reasoningContentProvider) GetDefaultModel() string {
 	return "reasoning-content-model"
 }
+
 type handledMediaProvider struct {
 	calls      int
 	toolCounts []int
@@ -210,7 +211,6 @@ func (m *handledMediaTool) Execute(ctx context.Context, args map[string]any) *to
 	return tools.MediaResult("Attachment delivered by tool.", []string{ref}).WithResponseHandled()
 }
 
-
 type handledMediaWithSteeringProvider struct {
 	calls int
 }
@@ -282,7 +282,6 @@ func (m *handledMediaWithSteeringTool) Execute(ctx context.Context, args map[str
 	return tools.MediaResult("Attachment delivered by tool.", []string{ref}).WithResponseHandled()
 }
 
-
 type mediaArtifactTool struct {
 	store media.MediaStore
 	path  string
@@ -311,7 +310,6 @@ func (m *mediaArtifactTool) Execute(ctx context.Context, args map[string]any) *t
 	}
 	return tools.MediaResult("Artifact created.", []string{ref})
 }
-
 
 type toolLimitTestTool struct{}
 

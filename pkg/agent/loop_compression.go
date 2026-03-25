@@ -1,4 +1,6 @@
-// loop_compression.go contains session compression, summarization, and token estimation for AgentLoop.
+// loop_compression.go contains session compression, summarization, and token estimation.
+// The compressionManager type owns all compression state and methods, following the
+// steeringQueue extraction pattern. AgentLoop delegates to it via al.compression.
 
 package agent
 
@@ -6,24 +8,42 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/providers"
 )
 
-func (al *AgentLoop) maybeSummarize(agent *AgentInstance, sessionKey string, turnScope turnEventScope) {
+// compressionManager encapsulates session compression, summarization, and token estimation.
+type compressionManager struct {
+	summarizing    sync.Map
+	activeRequests *sync.WaitGroup
+	emitEvent      func(EventKind, EventMeta, any)
+}
+
+func newCompressionManager(
+	activeRequests *sync.WaitGroup,
+	emitEvent func(EventKind, EventMeta, any),
+) *compressionManager {
+	return &compressionManager{
+		activeRequests: activeRequests,
+		emitEvent:      emitEvent,
+	}
+}
+
+func (cm *compressionManager) maybeSummarize(agent *AgentInstance, sessionKey string, turnScope turnEventScope) {
 	newHistory := agent.Sessions.GetHistory(sessionKey)
-	tokenEstimate := al.estimateTokens(newHistory)
+	tokenEstimate := cm.estimateTokens(newHistory)
 	threshold := agent.ContextWindow * agent.SummarizeTokenPercent / 100
 
 	if len(newHistory) > agent.SummarizeMessageThreshold || tokenEstimate > threshold {
 		summarizeKey := agent.ID + ":" + sessionKey
-		if _, loading := al.summarizing.LoadOrStore(summarizeKey, true); !loading {
+		if _, loading := cm.summarizing.LoadOrStore(summarizeKey, true); !loading {
 			go func() {
-				defer al.summarizing.Delete(summarizeKey)
+				defer cm.summarizing.Delete(summarizeKey)
 				logger.Debug("Memory threshold reached. Optimizing conversation history...")
-				al.summarizeSession(agent, sessionKey, turnScope)
+				cm.summarizeSession(agent, sessionKey, turnScope)
 			}()
 		}
 	}
@@ -46,7 +66,7 @@ type compressionResult struct {
 // prompt is built dynamically by BuildMessages and is NOT stored here.
 // The compression note is recorded in the session summary so that
 // BuildMessages can include it in the next system prompt.
-func (al *AgentLoop) forceCompression(agent *AgentInstance, sessionKey string) (compressionResult, bool) {
+func (cm *compressionManager) forceCompression(agent *AgentInstance, sessionKey string) (compressionResult, bool) {
 	history := agent.Sessions.GetHistory(sessionKey)
 	if len(history) <= 2 {
 		return compressionResult{}, false
@@ -111,7 +131,7 @@ func (al *AgentLoop) forceCompression(agent *AgentInstance, sessionKey string) (
 }
 
 // summarizeSession summarizes the conversation history for a session.
-func (al *AgentLoop) summarizeSession(agent *AgentInstance, sessionKey string, turnScope turnEventScope) {
+func (cm *compressionManager) summarizeSession(agent *AgentInstance, sessionKey string, turnScope turnEventScope) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
@@ -164,13 +184,13 @@ func (al *AgentLoop) summarizeSession(agent *AgentInstance, sessionKey string, t
 	if len(validMessages) > maxSummarizationMessages {
 		mid := len(validMessages) / 2
 
-		mid = al.findNearestUserMessage(validMessages, mid)
+		mid = cm.findNearestUserMessage(validMessages, mid)
 
 		part1 := validMessages[:mid]
 		part2 := validMessages[mid:]
 
-		s1, _ := al.summarizeBatch(ctx, agent, part1, "")
-		s2, _ := al.summarizeBatch(ctx, agent, part2, "")
+		s1, _ := cm.summarizeBatch(ctx, agent, part1, "")
+		s2, _ := cm.summarizeBatch(ctx, agent, part2, "")
 
 		mergePrompt := fmt.Sprintf(
 			"Merge these two conversation summaries into one cohesive summary:\n\n1: %s\n\n2: %s",
@@ -178,14 +198,14 @@ func (al *AgentLoop) summarizeSession(agent *AgentInstance, sessionKey string, t
 			s2,
 		)
 
-		resp, err := al.retryLLMCall(ctx, agent, mergePrompt, llmMaxRetries)
+		resp, err := cm.retryLLMCall(ctx, agent, mergePrompt, llmMaxRetries)
 		if err == nil && resp.Content != "" {
 			finalSummary = resp.Content
 		} else {
 			finalSummary = s1 + " " + s2
 		}
 	} else {
-		finalSummary, _ = al.summarizeBatch(ctx, agent, validMessages, summary)
+		finalSummary, _ = cm.summarizeBatch(ctx, agent, validMessages, summary)
 	}
 
 	if omitted && finalSummary != "" {
@@ -196,7 +216,7 @@ func (al *AgentLoop) summarizeSession(agent *AgentInstance, sessionKey string, t
 		agent.Sessions.SetSummary(sessionKey, finalSummary)
 		agent.Sessions.TruncateHistory(sessionKey, keepCount)
 		agent.Sessions.Save(sessionKey)
-		al.emitEvent(
+		cm.emitEvent(
 			EventKindSessionSummarize,
 			turnScope.meta(0, "summarizeSession", "turn.session.summarize"),
 			SessionSummarizePayload{
@@ -211,7 +231,7 @@ func (al *AgentLoop) summarizeSession(agent *AgentInstance, sessionKey string, t
 
 // findNearestUserMessage finds the nearest user message to the given index.
 // It searches backward first, then forward if no user message is found.
-func (al *AgentLoop) findNearestUserMessage(messages []providers.Message, mid int) int {
+func (cm *compressionManager) findNearestUserMessage(messages []providers.Message, mid int) int {
 	originalMid := mid
 
 	for mid > 0 && messages[mid].Role != "user" {
@@ -235,7 +255,7 @@ func (al *AgentLoop) findNearestUserMessage(messages []providers.Message, mid in
 }
 
 // retryLLMCall calls the LLM with retry logic.
-func (al *AgentLoop) retryLLMCall(
+func (cm *compressionManager) retryLLMCall(
 	ctx context.Context,
 	agent *AgentInstance,
 	prompt string,
@@ -249,9 +269,9 @@ func (al *AgentLoop) retryLLMCall(
 	var err error
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		al.activeRequests.Add(1)
+		cm.activeRequests.Add(1)
 		resp, err = func() (*providers.LLMResponse, error) {
-			defer al.activeRequests.Done()
+			defer cm.activeRequests.Done()
 			return agent.Provider.Chat(
 				ctx,
 				[]providers.Message{{Role: "user", Content: prompt}},
@@ -277,7 +297,7 @@ func (al *AgentLoop) retryLLMCall(
 }
 
 // summarizeBatch summarizes a batch of messages.
-func (al *AgentLoop) summarizeBatch(
+func (cm *compressionManager) summarizeBatch(
 	ctx context.Context,
 	agent *AgentInstance,
 	batch []providers.Message,
@@ -305,7 +325,7 @@ func (al *AgentLoop) summarizeBatch(
 	}
 	prompt := sb.String()
 
-	response, err := al.retryLLMCall(ctx, agent, prompt, llmMaxRetries)
+	response, err := cm.retryLLMCall(ctx, agent, prompt, llmMaxRetries)
 	if err == nil && response.Content != "" {
 		return strings.TrimSpace(response.Content), nil
 	}
@@ -344,7 +364,7 @@ func (al *AgentLoop) summarizeBatch(
 // estimateTokens estimates the number of tokens in a message list.
 // Counts Content, ToolCalls arguments, and ToolCallID metadata so that
 // tool-heavy conversations are not systematically undercounted.
-func (al *AgentLoop) estimateTokens(messages []providers.Message) int {
+func (cm *compressionManager) estimateTokens(messages []providers.Message) int {
 	total := 0
 	for _, m := range messages {
 		total += estimateMessageTokens(m)

@@ -44,7 +44,7 @@ func (m *memSessionStore) GetHistory(key string) []providers.Message {
 	return out
 }
 
-func (m *memSessionStore) GetSummary(key string) string  { return m.summary[key] }
+func (m *memSessionStore) GetSummary(key string) string   { return m.summary[key] }
 func (m *memSessionStore) SetSummary(key, summary string) { m.summary[key] = summary }
 func (m *memSessionStore) SetHistory(key string, history []providers.Message) {
 	m.history[key] = history
@@ -196,7 +196,7 @@ func TestEstimateTokens(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := al.estimateTokens(tc.messages)
+			got := al.compression.estimateTokens(tc.messages)
 			assert.GreaterOrEqual(t, got, tc.wantMin, "token estimate should be >= %d", tc.wantMin)
 		})
 	}
@@ -204,7 +204,7 @@ func TestEstimateTokens(t *testing.T) {
 	t.Run("monotonically increases with content", func(t *testing.T) {
 		short := []providers.Message{{Role: "user", Content: "hi"}}
 		long := []providers.Message{{Role: "user", Content: strings.Repeat("word ", 500)}}
-		assert.Greater(t, al.estimateTokens(long), al.estimateTokens(short))
+		assert.Greater(t, al.compression.estimateTokens(long), al.compression.estimateTokens(short))
 	})
 }
 
@@ -262,7 +262,7 @@ func TestFindNearestUserMessage(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := al.findNearestUserMessage(tc.messages, tc.mid)
+			got := al.compression.findNearestUserMessage(tc.messages, tc.mid)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -281,7 +281,7 @@ func TestForceCompression(t *testing.T) {
 
 		// Only 2 messages — should not compress
 		store.history["s1"] = makeMessages("user", "assistant")
-		result, ok := al.forceCompression(agent, "s1")
+		result, ok := al.compression.forceCompression(agent, "s1")
 		assert.False(t, ok)
 		assert.Equal(t, compressionResult{}, result)
 	})
@@ -294,7 +294,7 @@ func TestForceCompression(t *testing.T) {
 
 		// 6 messages with user-turn boundaries
 		store.history["s1"] = makeMessages("user", "assistant", "user", "assistant", "user", "assistant")
-		result, ok := al.forceCompression(agent, "s1")
+		result, ok := al.compression.forceCompression(agent, "s1")
 		require.True(t, ok)
 		assert.Greater(t, result.DroppedMessages, 0)
 		assert.Greater(t, result.RemainingMessages, 0)
@@ -313,7 +313,7 @@ func TestForceCompression(t *testing.T) {
 
 		store.summary["s1"] = "Previous context summary"
 		store.history["s1"] = makeMessages("user", "assistant", "user", "assistant", "user", "assistant")
-		_, ok := al.forceCompression(agent, "s1")
+		_, ok := al.compression.forceCompression(agent, "s1")
 		require.True(t, ok)
 
 		summary := store.GetSummary("s1")
@@ -335,7 +335,7 @@ func TestForceCompression(t *testing.T) {
 			{Role: "tool", Content: "result 2"},
 			{Role: "tool", Content: "result 3"},
 		}
-		result, ok := al.forceCompression(agent, "s1")
+		result, ok := al.compression.forceCompression(agent, "s1")
 		require.True(t, ok)
 
 		remaining := store.GetHistory("s1")
@@ -361,11 +361,11 @@ func TestMaybeSummarize(t *testing.T) {
 
 		// Only 3 messages, well below threshold
 		store.history["s1"] = makeMessages("user", "assistant", "user")
-		scope := al.newTurnEventScope("test-agent", "s1")
-		al.maybeSummarize(agent, "s1", scope)
+		scope := al.events.newTurnEventScope("test-agent", "s1")
+		al.compression.maybeSummarize(agent, "s1", scope)
 
 		// Should not have started summarization (sync.Map should be empty)
-		_, loaded := al.summarizing.Load("test-agent:s1")
+		_, loaded := al.compression.summarizing.Load("test-agent:s1")
 		// If loaded is true, goroutine was started but should finish quickly
 		// Either way, with only 3 messages, no summarization should trigger
 		assert.False(t, loaded, "should not trigger summarization below threshold")
@@ -388,8 +388,8 @@ func TestMaybeSummarize(t *testing.T) {
 
 		// 5 messages, above threshold of 3
 		store.history["s1"] = makeMessages("user", "assistant", "user", "assistant", "user")
-		scope := al.newTurnEventScope("test-agent", "s1")
-		al.maybeSummarize(agent, "s1", scope)
+		scope := al.events.newTurnEventScope("test-agent", "s1")
+		al.compression.maybeSummarize(agent, "s1", scope)
 
 		// The summarization runs in a goroutine; verify the key was stored
 		// (or already completed). We just check it doesn't panic.
@@ -407,8 +407,8 @@ func TestMaybeSummarize(t *testing.T) {
 		}
 		agent := testAgent(store, prov)
 		agent.SummarizeMessageThreshold = 1000 // Very high message threshold
-		agent.SummarizeTokenPercent = 1         // 1% of context window
-		agent.ContextWindow = 100               // Small context window => threshold = 1 token
+		agent.SummarizeTokenPercent = 1        // 1% of context window
+		agent.ContextWindow = 100              // Small context window => threshold = 1 token
 
 		// Enough content to exceed the token threshold
 		store.history["s1"] = []providers.Message{
@@ -418,8 +418,8 @@ func TestMaybeSummarize(t *testing.T) {
 			{Role: "assistant", Content: strings.Repeat("response ", 100)},
 			{Role: "user", Content: strings.Repeat("again ", 100)},
 		}
-		scope := al.newTurnEventScope("test-agent", "s1")
-		al.maybeSummarize(agent, "s1", scope)
+		scope := al.events.newTurnEventScope("test-agent", "s1")
+		al.compression.maybeSummarize(agent, "s1", scope)
 		// Should not panic; summarization triggered in background
 	})
 }
@@ -440,7 +440,7 @@ func TestRetryLLMCall(t *testing.T) {
 		}
 		agent := testAgent(newMemSessionStore(), prov)
 
-		resp, err := al.retryLLMCall(context.Background(), agent, "test prompt", 3)
+		resp, err := al.compression.retryLLMCall(context.Background(), agent, "test prompt", 3)
 		require.NoError(t, err)
 		require.NotNil(t, resp)
 		assert.Equal(t, "success", resp.Content)
@@ -463,7 +463,7 @@ func TestRetryLLMCall(t *testing.T) {
 		}
 		agent := testAgent(newMemSessionStore(), prov)
 
-		resp, err := al.retryLLMCall(context.Background(), agent, "test prompt", 3)
+		resp, err := al.compression.retryLLMCall(context.Background(), agent, "test prompt", 3)
 		require.NoError(t, err)
 		require.NotNil(t, resp)
 		assert.Equal(t, "recovered", resp.Content)
@@ -483,7 +483,7 @@ func TestRetryLLMCall(t *testing.T) {
 		}
 		agent := testAgent(newMemSessionStore(), prov)
 
-		_, err := al.retryLLMCall(context.Background(), agent, "test prompt", 3)
+		_, err := al.compression.retryLLMCall(context.Background(), agent, "test prompt", 3)
 		assert.Error(t, err)
 		assert.Equal(t, 3, prov.calls)
 	})
@@ -500,7 +500,7 @@ func TestRetryLLMCall(t *testing.T) {
 		}
 		agent := testAgent(newMemSessionStore(), prov)
 
-		resp, err := al.retryLLMCall(context.Background(), agent, "test prompt", 3)
+		resp, err := al.compression.retryLLMCall(context.Background(), agent, "test prompt", 3)
 		require.NoError(t, err)
 		assert.Equal(t, "got it", resp.Content)
 		assert.Equal(t, 2, prov.calls)
@@ -515,7 +515,7 @@ func TestRetryLLMCall(t *testing.T) {
 		}
 		agent := testAgent(newMemSessionStore(), prov)
 
-		_, err := al.retryLLMCall(context.Background(), agent, "prompt", 1)
+		_, err := al.compression.retryLLMCall(context.Background(), agent, "prompt", 1)
 		assert.Error(t, err)
 		assert.Equal(t, 1, prov.calls)
 	})
@@ -542,7 +542,7 @@ func TestSummarizeBatch(t *testing.T) {
 			{Role: "assistant", Content: "Go is a programming language."},
 		}
 
-		result, err := al.summarizeBatch(context.Background(), agent, batch, "")
+		result, err := al.compression.summarizeBatch(context.Background(), agent, batch, "")
 		require.NoError(t, err)
 		assert.Equal(t, "concise summary", result, "should trim whitespace")
 	})
@@ -562,7 +562,7 @@ func TestSummarizeBatch(t *testing.T) {
 			{Role: "user", Content: "new question"},
 		}
 
-		result, err := al.summarizeBatch(context.Background(), agent, batch, "prior context")
+		result, err := al.compression.summarizeBatch(context.Background(), agent, batch, "prior context")
 		require.NoError(t, err)
 		assert.Equal(t, "updated summary", result)
 		assert.Equal(t, 1, prov.calls)
@@ -586,7 +586,7 @@ func TestSummarizeBatch(t *testing.T) {
 			{Role: "assistant", Content: "Go is great"},
 		}
 
-		result, err := al.summarizeBatch(context.Background(), agent, batch, "")
+		result, err := al.compression.summarizeBatch(context.Background(), agent, batch, "")
 		require.NoError(t, err)
 		assert.Contains(t, result, "Conversation summary:")
 		assert.Contains(t, result, "user:")
@@ -610,7 +610,7 @@ func TestSummarizeBatch(t *testing.T) {
 			{Role: "user", Content: ""},
 		}
 
-		result, err := al.summarizeBatch(context.Background(), agent, batch, "")
+		result, err := al.compression.summarizeBatch(context.Background(), agent, batch, "")
 		require.NoError(t, err)
 		assert.Contains(t, result, "user:")
 	})
@@ -633,7 +633,7 @@ func TestSummarizeBatch(t *testing.T) {
 			{Role: "user", Content: longContent},
 		}
 
-		result, err := al.summarizeBatch(context.Background(), agent, batch, "")
+		result, err := al.compression.summarizeBatch(context.Background(), agent, batch, "")
 		require.NoError(t, err)
 		// Fallback keeps max(10% of length, 200) chars — so 500 chars for 5000 char content
 		// The result should be shorter than the original + overhead
@@ -659,7 +659,7 @@ func TestSummarizeBatch(t *testing.T) {
 			{Role: "assistant", Content: "second"},
 		}
 
-		result, err := al.summarizeBatch(context.Background(), agent, batch, "")
+		result, err := al.compression.summarizeBatch(context.Background(), agent, batch, "")
 		require.NoError(t, err)
 		assert.Contains(t, result, " | ")
 	})

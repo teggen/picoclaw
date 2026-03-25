@@ -226,7 +226,7 @@ func (al *AgentLoop) enqueueSteeringMessage(scope, agentID string, msg providers
 		}
 	}
 
-	al.emitEvent(
+	al.events.emitEvent(
 		EventKindInterruptReceived,
 		meta,
 		InterruptReceivedPayload{
@@ -364,7 +364,7 @@ func (al *AgentLoop) InterruptGraceful(hint string) error {
 		return fmt.Errorf("turn %s cannot accept graceful interrupt", ts.turnID)
 	}
 
-	al.emitEvent(
+	al.events.emitEvent(
 		EventKindInterruptReceived,
 		ts.eventMeta("InterruptGraceful", "turn.interrupt.received"),
 		InterruptReceivedPayload{
@@ -385,7 +385,7 @@ func (al *AgentLoop) InterruptHard() error {
 		return fmt.Errorf("turn %s is already aborting", ts.turnID)
 	}
 
-	al.emitEvent(
+	al.events.emitEvent(
 		EventKindInterruptReceived,
 		ts.eventMeta("InterruptHard", "turn.interrupt.received"),
 		InterruptReceivedPayload{

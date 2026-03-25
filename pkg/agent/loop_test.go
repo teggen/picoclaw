@@ -454,8 +454,6 @@ func TestProcessDirectWithChannel_TriggersMCPInitialization(t *testing.T) {
 	}
 }
 
-
-
 func TestResolveMediaRefs_ResolvesToBase64(t *testing.T) {
 	store := media.NewFileMediaStore()
 	dir := t.TempDir()
@@ -739,4 +737,3 @@ func TestResolveMediaRefs_MixedImageAndFile(t *testing.T) {
 		t.Fatalf("expected content %q, got %q", expectedContent, result[0].Content)
 	}
 }
-

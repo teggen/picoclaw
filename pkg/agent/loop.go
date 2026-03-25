@@ -20,7 +20,6 @@ import (
 	"github.com/sipeed/picoclaw/pkg/channels"
 	"github.com/sipeed/picoclaw/pkg/commands"
 	"github.com/sipeed/picoclaw/pkg/config"
-	"github.com/sipeed/picoclaw/pkg/events"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/media"
 	"github.com/sipeed/picoclaw/pkg/providers"
@@ -38,33 +37,28 @@ type AgentLoop struct {
 	registry *AgentRegistry
 	state    *state.Manager
 
-	// Event system (from Incoming)
-	eventBus *EventBus
-	hooks    *HookManager
-
-	// External event broadcaster
-	eventBroadcaster events.Broadcaster
+	// Event and hook system
+	events      *eventSystem
+	hooks       *HookManager
+	hookRuntime hookRuntime
 
 	// Runtime state
 	running        atomic.Bool
-	summarizing    sync.Map
+	compression    *compressionManager
 	fallback       *providers.FallbackChain
 	channelManager *channels.Manager
 	mediaStore     media.MediaStore
 	transcriber    voice.Transcriber
-	cmdRegistry    *commands.Registry
+	routing        *routingDispatcher
 	mcp            mcpRuntime
-	hookRuntime    hookRuntime
 	steering       *steeringQueue
-	pendingSkills  sync.Map
 	mu             sync.RWMutex
 
-	// Concurrent turn management (from HEAD)
+	// Concurrent turn management
 	activeTurnStates sync.Map     // key: sessionKey (string), value: *turnState
 	subTurnCounter   atomic.Int64 // Counter for generating unique SubTurn IDs
 
-	// Turn tracking (from Incoming)
-	turnSeq        atomic.Uint64
+	// Turn tracking
 	activeRequests sync.WaitGroup
 
 	reloadFunc func() error
@@ -126,17 +120,20 @@ func NewAgentLoop(
 	}
 
 	eventBus := NewEventBus()
+	es := newEventSystem(eventBus)
 	al := &AgentLoop{
-		bus:         msgBus,
-		cfg:         cfg,
-		registry:    registry,
-		state:       stateManager,
-		eventBus:    eventBus,
-		summarizing: sync.Map{},
-		fallback:    fallbackChain,
-		cmdRegistry: commands.NewRegistry(commands.BuiltinDefinitions()),
-		steering:    newSteeringQueue(parseSteeringMode(cfg.Agents.Defaults.SteeringMode)),
+		bus:      msgBus,
+		cfg:      cfg,
+		registry: registry,
+		state:    stateManager,
+		events:   es,
+		fallback: fallbackChain,
+		routing: &routingDispatcher{
+			cmdRegistry: commands.NewRegistry(commands.BuiltinDefinitions()),
+		},
+		steering: newSteeringQueue(parseSteeringMode(cfg.Agents.Defaults.SteeringMode)),
 	}
+	al.compression = newCompressionManager(&al.activeRequests, es.emitEvent)
 	al.hooks = NewHookManager(eventBus)
 	configureHookManagerFromConfig(al.hooks, cfg)
 
@@ -668,9 +665,7 @@ func (al *AgentLoop) Close() {
 	if al.hooks != nil {
 		al.hooks.Close()
 	}
-	if al.eventBus != nil {
-		al.eventBus.Close()
-	}
+	al.events.close()
 }
 
 func (al *AgentLoop) RegisterTool(tool tools.Tool) {

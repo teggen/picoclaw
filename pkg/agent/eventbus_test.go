@@ -472,8 +472,8 @@ func TestAgentLoop_EmitsSessionSummarizeEvent(t *testing.T) {
 	sub := al.SubscribeEvents(16)
 	defer al.UnsubscribeEvents(sub.ID)
 
-	turnScope := al.newTurnEventScope(defaultAgent.ID, "session-1")
-	al.summarizeSession(defaultAgent, "session-1", turnScope)
+	turnScope := al.events.newTurnEventScope(defaultAgent.ID, "session-1")
+	al.compression.summarizeSession(defaultAgent, "session-1", turnScope)
 
 	events := collectEventStream(sub.C)
 	summaryEvt, ok := findEvent(events, EventKindSessionSummarize)

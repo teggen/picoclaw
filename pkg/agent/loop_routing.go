@@ -1,4 +1,5 @@
 // loop_routing.go contains message routing, command dispatch, and skill management for AgentLoop.
+// The routingDispatcher type owns command registry and pending skill state.
 
 package agent
 
@@ -6,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
@@ -16,6 +18,12 @@ import (
 	"github.com/sipeed/picoclaw/pkg/routing"
 	"github.com/sipeed/picoclaw/pkg/utils"
 )
+
+// routingDispatcher owns command registry and pending skill state.
+type routingDispatcher struct {
+	cmdRegistry   *commands.Registry
+	pendingSkills sync.Map
+}
 
 func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage) (string, error) {
 	// Add message preview to log (show full content for error messages)
@@ -95,7 +103,7 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		return response, nil
 	}
 
-	if pending := al.takePendingSkills(opts.SessionKey); len(pending) > 0 {
+	if pending := al.routing.takePendingSkills(opts.SessionKey); len(pending) > 0 {
 		opts.ForcedSkills = append(opts.ForcedSkills, pending...)
 		logger.InfoCF("agent", "Applying pending skill override",
 			map[string]any{
@@ -244,12 +252,12 @@ func (al *AgentLoop) handleCommand(
 		return reply, handled
 	}
 
-	if al.cmdRegistry == nil {
+	if al.routing.cmdRegistry == nil {
 		return "", false
 	}
 
 	rt := al.buildCommandsRuntime(agent, opts)
-	executor := commands.NewExecutor(al.cmdRegistry, rt)
+	executor := commands.NewExecutor(al.routing.cmdRegistry, rt)
 
 	var commandReply string
 	result := executor.Execute(ctx, commands.Request{
@@ -334,7 +342,7 @@ func (al *AgentLoop) applyExplicitSkillCommand(
 	arg := strings.TrimSpace(parts[1])
 	if strings.EqualFold(arg, "clear") || strings.EqualFold(arg, "off") {
 		if opts != nil {
-			al.clearPendingSkills(opts.SessionKey)
+			al.routing.clearPendingSkills(opts.SessionKey)
 		}
 		return true, true, "Cleared pending skill override."
 	}
@@ -348,7 +356,7 @@ func (al *AgentLoop) applyExplicitSkillCommand(
 		if opts == nil || strings.TrimSpace(opts.SessionKey) == "" {
 			return true, true, commandsUnavailableSkillMessage()
 		}
-		al.setPendingSkills(opts.SessionKey, []string{skillName})
+		al.routing.setPendingSkills(opts.SessionKey, []string{skillName})
 		return true, true, fmt.Sprintf(
 			"Skill %q is armed for your next message. Send your next prompt normally, or use /use clear to cancel.",
 			skillName,
@@ -374,7 +382,7 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance, opts *processOpt
 	rt := &commands.Runtime{
 		Config:          cfg,
 		ListAgentIDs:    registry.ListAgentIDs,
-		ListDefinitions: al.cmdRegistry.Definitions,
+		ListDefinitions: al.routing.cmdRegistry.Definitions,
 		GetEnabledChannels: func() []string {
 			if al.channelManager == nil {
 				return nil
@@ -483,7 +491,7 @@ func buildUseCommandHelp(agent *AgentInstance) string {
 	)
 }
 
-func (al *AgentLoop) setPendingSkills(sessionKey string, skillNames []string) {
+func (rd *routingDispatcher) setPendingSkills(sessionKey string, skillNames []string) {
 	sessionKey = strings.TrimSpace(sessionKey)
 	if sessionKey == "" || len(skillNames) == 0 {
 		return
@@ -500,16 +508,16 @@ func (al *AgentLoop) setPendingSkills(sessionKey string, skillNames []string) {
 		return
 	}
 
-	al.pendingSkills.Store(sessionKey, filtered)
+	rd.pendingSkills.Store(sessionKey, filtered)
 }
 
-func (al *AgentLoop) takePendingSkills(sessionKey string) []string {
+func (rd *routingDispatcher) takePendingSkills(sessionKey string) []string {
 	sessionKey = strings.TrimSpace(sessionKey)
 	if sessionKey == "" {
 		return nil
 	}
 
-	value, ok := al.pendingSkills.LoadAndDelete(sessionKey)
+	value, ok := rd.pendingSkills.LoadAndDelete(sessionKey)
 	if !ok {
 		return nil
 	}
@@ -522,12 +530,12 @@ func (al *AgentLoop) takePendingSkills(sessionKey string) []string {
 	return append([]string(nil), skills...)
 }
 
-func (al *AgentLoop) clearPendingSkills(sessionKey string) {
+func (rd *routingDispatcher) clearPendingSkills(sessionKey string) {
 	sessionKey = strings.TrimSpace(sessionKey)
 	if sessionKey == "" {
 		return
 	}
-	al.pendingSkills.Delete(sessionKey)
+	rd.pendingSkills.Delete(sessionKey)
 }
 
 func mapCommandError(result commands.ExecuteResult) string {

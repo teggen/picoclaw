@@ -13,11 +13,11 @@ import (
 
 func TestBuildModelListResolver(t *testing.T) {
 	tests := []struct {
-		name       string
-		cfg        *config.Config
-		input      string
-		wantModel  string
-		wantFound  bool
+		name      string
+		cfg       *config.Config
+		input     string
+		wantModel string
+		wantFound bool
 	}{
 		{
 			name:      "nil config returns not found",
