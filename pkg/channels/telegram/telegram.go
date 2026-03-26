@@ -298,7 +298,7 @@ func (c *TelegramChannel) sendChunk(
 		tgMsg.Text = params.mdFallback
 		tgMsg.ParseMode = ""
 		if _, err = c.bot.SendMessage(ctx, tgMsg); err != nil {
-			return fmt.Errorf("telegram send: %w", channels.ErrTemporary)
+			return channels.ClassifyAPIError(fmt.Errorf("telegram send: %w", err))
 		}
 	}
 
@@ -526,7 +526,7 @@ func (c *TelegramChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMe
 				"type":  part.Type,
 				"error": err.Error(),
 			})
-			return fmt.Errorf("telegram send media: %w", channels.ErrTemporary)
+			return channels.ClassifyAPIError(fmt.Errorf("telegram send media: %w", err))
 		}
 	}
 

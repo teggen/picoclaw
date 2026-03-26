@@ -165,6 +165,30 @@ func TestSendWithRetry_PermanentFailure(t *testing.T) {
 	}
 }
 
+func TestSendWithRetry_AuthFailed(t *testing.T) {
+	m := newTestManager()
+	var callCount int
+	ch := &mockChannel{
+		sendFn: func(_ context.Context, _ bus.OutboundMessage) error {
+			callCount++
+			return fmt.Errorf("invalid token: %w", ErrAuthFailed)
+		},
+	}
+	w := &channelWorker{
+		ch:      ch,
+		limiter: rate.NewLimiter(rate.Inf, 1),
+	}
+
+	ctx := context.Background()
+	msg := bus.OutboundMessage{Channel: "test", ChatID: "1", Content: "hello"}
+
+	m.sendWithRetry(ctx, "test", w, msg)
+
+	if callCount != 1 {
+		t.Fatalf("expected 1 Send call (no retry for auth failure), got %d", callCount)
+	}
+}
+
 func TestSendWithRetry_NotRunning(t *testing.T) {
 	m := newTestManager()
 	var callCount int

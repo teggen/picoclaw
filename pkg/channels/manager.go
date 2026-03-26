@@ -673,7 +673,7 @@ func (m *Manager) sendWithRetry(ctx context.Context, name string, w *channelWork
 		}
 
 		// Permanent failures — don't retry
-		if errors.Is(lastErr, ErrNotRunning) || errors.Is(lastErr, ErrSendFailed) {
+		if errors.Is(lastErr, ErrNotRunning) || errors.Is(lastErr, ErrSendFailed) || errors.Is(lastErr, ErrAuthFailed) {
 			break
 		}
 
@@ -873,7 +873,7 @@ func (m *Manager) sendMediaWithRetry(
 		}
 
 		// Permanent failures — don't retry
-		if errors.Is(lastErr, ErrNotRunning) || errors.Is(lastErr, ErrSendFailed) {
+		if errors.Is(lastErr, ErrNotRunning) || errors.Is(lastErr, ErrSendFailed) || errors.Is(lastErr, ErrAuthFailed) {
 			break
 		}
 

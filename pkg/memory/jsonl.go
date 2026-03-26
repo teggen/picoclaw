@@ -54,8 +54,9 @@ type sessionMeta struct {
 // GetHistory ignores lines before that offset. This keeps all writes
 // append-only, which is both fast and crash-safe.
 type JSONLStore struct {
-	dir   string
-	locks [numLockShards]sync.Mutex
+	dir       string
+	locks     [numLockShards]sync.RWMutex
+	metaCache [numLockShards]map[string]*sessionMeta
 }
 
 // NewJSONLStore creates a new JSONL-backed store rooted at dir.
@@ -67,13 +68,18 @@ func NewJSONLStore(dir string) (*JSONLStore, error) {
 	return &JSONLStore{dir: dir}, nil
 }
 
-// sessionLock returns a mutex for the given session key.
+// shardIndex returns the shard index for the given session key.
 // Keys are mapped to a fixed pool of shards via FNV hash, so
 // memory usage is O(1) regardless of total session count.
-func (s *JSONLStore) sessionLock(key string) *sync.Mutex {
+func (s *JSONLStore) shardIndex(key string) uint32 {
 	h := fnv.New32a()
 	h.Write([]byte(key))
-	return &s.locks[h.Sum32()%numLockShards]
+	return h.Sum32() % numLockShards
+}
+
+// sessionLock returns an RWMutex for the given session key.
+func (s *JSONLStore) sessionLock(key string) *sync.RWMutex {
+	return &s.locks[s.shardIndex(key)]
 }
 
 func (s *JSONLStore) jsonlPath(key string) string {
@@ -96,9 +102,18 @@ func sanitizeKey(key string) string {
 	return s
 }
 
-// readMeta loads the metadata file for a session.
-// Returns a zero-value sessionMeta if the file does not exist.
+// readMeta loads the metadata for a session, returning a cached copy
+// if available. The caller must hold the shard lock (read or write).
+// Returns a zero-value sessionMeta if neither cache nor file exists.
 func (s *JSONLStore) readMeta(key string) (sessionMeta, error) {
+	idx := s.shardIndex(key)
+	if cache := s.metaCache[idx]; cache != nil {
+		if cached, ok := cache[key]; ok {
+			cp := *cached
+			return cp, nil
+		}
+	}
+
 	data, err := os.ReadFile(s.metaPath(key))
 	if os.IsNotExist(err) {
 		return sessionMeta{Key: key}, nil
@@ -111,17 +126,31 @@ func (s *JSONLStore) readMeta(key string) (sessionMeta, error) {
 	if err != nil {
 		return sessionMeta{}, fmt.Errorf("memory: decode meta: %w", err)
 	}
+
+	// Populate cache (only safe under write lock, so skip if called
+	// from a read-locked path — the next write will populate it).
 	return meta, nil
 }
 
-// writeMeta atomically writes the metadata file using the project's
-// standard WriteFileAtomic (temp + fsync + rename).
+// writeMeta atomically writes the metadata file and updates the
+// in-memory cache. The caller must hold the shard write lock.
 func (s *JSONLStore) writeMeta(key string, meta sessionMeta) error {
 	data, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
 		return fmt.Errorf("memory: encode meta: %w", err)
 	}
-	return fileutil.WriteFileAtomic(s.metaPath(key), data, 0o644)
+	if err := fileutil.WriteFileAtomic(s.metaPath(key), data, 0o644); err != nil {
+		return err
+	}
+
+	// Update cache.
+	idx := s.shardIndex(key)
+	if s.metaCache[idx] == nil {
+		s.metaCache[idx] = make(map[string]*sessionMeta)
+	}
+	cp := meta
+	s.metaCache[idx][key] = &cp
+	return nil
 }
 
 // readMessages reads valid JSON lines from a .jsonl file, skipping
@@ -271,8 +300,8 @@ func (s *JSONLStore) GetHistory(
 	_ context.Context, sessionKey string,
 ) ([]providers.Message, error) {
 	l := s.sessionLock(sessionKey)
-	l.Lock()
-	defer l.Unlock()
+	l.RLock()
+	defer l.RUnlock()
 
 	meta, err := s.readMeta(sessionKey)
 	if err != nil {
@@ -293,8 +322,8 @@ func (s *JSONLStore) GetSummary(
 	_ context.Context, sessionKey string,
 ) (string, error) {
 	l := s.sessionLock(sessionKey)
-	l.Lock()
-	defer l.Unlock()
+	l.RLock()
+	defer l.RUnlock()
 
 	meta, err := s.readMeta(sessionKey)
 	if err != nil {

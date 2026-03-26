@@ -132,7 +132,7 @@ func (c *SlackChannel) Send(ctx context.Context, msg bus.OutboundMessage) error 
 
 	_, _, err := c.api.PostMessageContext(ctx, channelID, opts...)
 	if err != nil {
-		return fmt.Errorf("slack send: %w", channels.ErrTemporary)
+		return channels.ClassifyAPIError(fmt.Errorf("slack send: %w", err))
 	}
 
 	if ref, ok := c.pendingAcks.LoadAndDelete(msg.ChatID); ok {
@@ -198,7 +198,7 @@ func (c *SlackChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMessa
 				"filename": filename,
 				"error":    err.Error(),
 			})
-			return fmt.Errorf("slack send media: %w", channels.ErrTemporary)
+			return channels.ClassifyAPIError(fmt.Errorf("slack send media: %w", err))
 		}
 	}
 

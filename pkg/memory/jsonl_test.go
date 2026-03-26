@@ -781,6 +781,189 @@ func TestMultipleSessions_Isolation(t *testing.T) {
 	}
 }
 
+func TestConcurrent_ParallelReads(t *testing.T) {
+	// Verify that multiple goroutines can read the same session
+	// simultaneously without blocking each other (RLock allows this).
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	// Seed with messages.
+	for i := 0; i < 50; i++ {
+		err := store.AddMessage(ctx, "reads", "user", "msg")
+		if err != nil {
+			t.Fatalf("AddMessage: %v", err)
+		}
+	}
+	err := store.SetSummary(ctx, "reads", "a test summary")
+	if err != nil {
+		t.Fatalf("SetSummary: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	const readers = 20
+
+	for g := 0; g < readers; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 10; i++ {
+				history, err := store.GetHistory(ctx, "reads")
+				if err != nil {
+					t.Errorf("GetHistory: %v", err)
+					return
+				}
+				if len(history) != 50 {
+					t.Errorf("expected 50, got %d", len(history))
+					return
+				}
+				summary, err := store.GetSummary(ctx, "reads")
+				if err != nil {
+					t.Errorf("GetSummary: %v", err)
+					return
+				}
+				if summary != "a test summary" {
+					t.Errorf("summary = %q", summary)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func TestConcurrent_ReadWriteMixed(t *testing.T) {
+	// Writers and readers operating on the same session concurrently.
+	// Verifies no data races with the RWMutex upgrade.
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	// Seed with some messages.
+	for i := 0; i < 10; i++ {
+		err := store.AddMessage(ctx, "mixed", "user", "seed")
+		if err != nil {
+			t.Fatalf("AddMessage: %v", err)
+		}
+	}
+
+	var wg sync.WaitGroup
+	const writers = 5
+	const readers = 10
+	const iterations = 20
+
+	// Writers: add messages and update summaries.
+	for g := 0; g < writers; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				_ = store.AddMessage(ctx, "mixed", "user", "new")
+				_ = store.SetSummary(ctx, "mixed", "updated")
+			}
+		}()
+	}
+
+	// Readers: read history and summary concurrently with writes.
+	for g := 0; g < readers; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				history, err := store.GetHistory(ctx, "mixed")
+				if err != nil {
+					t.Errorf("GetHistory: %v", err)
+					return
+				}
+				if len(history) < 10 {
+					t.Errorf("expected >= 10 messages, got %d", len(history))
+					return
+				}
+				_, err = store.GetSummary(ctx, "mixed")
+				if err != nil {
+					t.Errorf("GetSummary: %v", err)
+					return
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	// Final consistency check.
+	history, err := store.GetHistory(ctx, "mixed")
+	if err != nil {
+		t.Fatalf("GetHistory: %v", err)
+	}
+	expected := 10 + writers*iterations
+	if len(history) != expected {
+		t.Errorf("expected %d messages, got %d", expected, len(history))
+	}
+}
+
+func TestMetaCache_PopulatedOnWrite(t *testing.T) {
+	// After a write, subsequent reads should hit the cache.
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	err := store.AddMessage(ctx, "cache-test", "user", "hello")
+	if err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+
+	// The meta cache should now have an entry.
+	idx := store.shardIndex("cache-test")
+	if store.metaCache[idx] == nil {
+		t.Fatal("expected metaCache shard to be initialized")
+	}
+	cached, ok := store.metaCache[idx]["cache-test"]
+	if !ok {
+		t.Fatal("expected cache entry for 'cache-test'")
+	}
+	if cached.Count != 1 {
+		t.Errorf("cached count = %d, want 1", cached.Count)
+	}
+
+	// Read should still work correctly (via cache).
+	history, err := store.GetHistory(ctx, "cache-test")
+	if err != nil {
+		t.Fatalf("GetHistory: %v", err)
+	}
+	if len(history) != 1 {
+		t.Errorf("expected 1, got %d", len(history))
+	}
+}
+
+func TestMetaCache_InvalidatedOnSetHistory(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	// Seed and verify cache is populated.
+	for i := 0; i < 5; i++ {
+		err := store.AddMessage(ctx, "inv", "user", "old")
+		if err != nil {
+			t.Fatalf("AddMessage: %v", err)
+		}
+	}
+
+	// SetHistory should update the cache.
+	newHistory := []providers.Message{
+		{Role: "user", Content: "new1"},
+		{Role: "assistant", Content: "new2"},
+	}
+	err := store.SetHistory(ctx, "inv", newHistory)
+	if err != nil {
+		t.Fatalf("SetHistory: %v", err)
+	}
+
+	idx := store.shardIndex("inv")
+	cached := store.metaCache[idx]["inv"]
+	if cached.Count != 2 {
+		t.Errorf("cached count = %d, want 2", cached.Count)
+	}
+	if cached.Skip != 0 {
+		t.Errorf("cached skip = %d, want 0", cached.Skip)
+	}
+}
+
 func BenchmarkAddMessage(b *testing.B) {
 	dir := b.TempDir()
 	store, err := NewJSONLStore(dir)

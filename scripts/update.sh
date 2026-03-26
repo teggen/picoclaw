@@ -2,6 +2,10 @@
 set -euo pipefail
 
 BINARY_SRC="${1:-./build/picoclaw}"
+FOLLOW_MODE=false
+if [[ "${2:-}" == "--follow" ]]; then
+    FOLLOW_MODE=true
+fi
 INSTALL_BIN="/usr/local/bin/picoclaw"
 
 # Derive CLI binary path from the same build directory.
@@ -55,10 +59,12 @@ fi
 
 # --- Restart service if running ---
 if systemctl is-active --quiet picoclaw 2>/dev/null; then
+    RESTART_TIME="$(date '+%Y-%m-%d %H:%M:%S')"
     echo "Restarting picoclaw service..."
     systemctl restart picoclaw
 else
     echo "Note: picoclaw service is not currently active; skipping restart."
+    RESTART_TIME=""
 fi
 
 echo ""
@@ -69,5 +75,16 @@ echo ""
 echo "Service status:"
 systemctl status picoclaw --no-pager || true
 echo ""
-echo "Recent logs:"
-journalctl -u picoclaw -n 20 --no-pager || true
+
+if [[ -n "$RESTART_TIME" ]]; then
+    if [[ "$FOLLOW_MODE" == true ]]; then
+        echo "Following logs since restart (Ctrl+C to stop):"
+        journalctl -u picoclaw --since="$RESTART_TIME" -f --no-pager || true
+    else
+        echo "Streaming logs for 10 seconds since restart:"
+        timeout 10 journalctl -u picoclaw --since="$RESTART_TIME" -f --no-pager || true
+    fi
+else
+    echo "Recent logs:"
+    journalctl -u picoclaw -n 20 --no-pager || true
+fi

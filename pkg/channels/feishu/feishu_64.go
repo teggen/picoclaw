@@ -375,7 +375,7 @@ func (c *FeishuChannel) sendMediaPart(
 			"type":  part.Type,
 			"error": err.Error(),
 		})
-		return fmt.Errorf("feishu send media: %w", channels.ErrTemporary)
+		return channels.ClassifyAPIError(fmt.Errorf("feishu send media: %w", err))
 	}
 	return nil
 }
@@ -787,12 +787,12 @@ func (c *FeishuChannel) sendCard(ctx context.Context, chatID, cardContent string
 
 	resp, err := c.client.Im.V1.Message.Create(ctx, req)
 	if err != nil {
-		return fmt.Errorf("feishu send card: %w", channels.ErrTemporary)
+		return channels.ClassifyAPIError(fmt.Errorf("feishu send card: %w", err))
 	}
 
 	if !resp.Success() {
 		c.invalidateTokenOnAuthError(resp.Code)
-		return fmt.Errorf("feishu api error (code=%d msg=%s): %w", resp.Code, resp.Msg, channels.ErrTemporary)
+		return channels.ClassifyAPIError(fmt.Errorf("feishu api error (code=%d msg=%s)", resp.Code, resp.Msg))
 	}
 
 	logger.DebugCF("feishu", "Feishu card message sent", map[string]any{
@@ -817,11 +817,11 @@ func (c *FeishuChannel) sendText(ctx context.Context, chatID, text string) error
 
 	resp, err := c.client.Im.V1.Message.Create(ctx, req)
 	if err != nil {
-		return fmt.Errorf("feishu send text: %w", channels.ErrTemporary)
+		return channels.ClassifyAPIError(fmt.Errorf("feishu send text: %w", err))
 	}
 
 	if !resp.Success() {
-		return fmt.Errorf("feishu text api error (code=%d msg=%s): %w", resp.Code, resp.Msg, channels.ErrTemporary)
+		return channels.ClassifyAPIError(fmt.Errorf("feishu text api error (code=%d msg=%s)", resp.Code, resp.Msg))
 	}
 
 	logger.DebugCF("feishu", "Feishu text message sent (fallback)", map[string]any{

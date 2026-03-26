@@ -15,6 +15,10 @@ var (
 	// Manager will use exponential backoff and retry.
 	ErrTemporary = errors.New("temporary failure")
 
+	// ErrAuthFailed indicates an authentication or authorization failure (e.g. HTTP 401/403).
+	// Manager will not retry — the request cannot succeed without credential changes.
+	ErrAuthFailed = errors.New("authentication failed")
+
 	// ErrSendFailed indicates a permanent failure (e.g. invalid chat ID, 4xx non-429).
 	// Manager will not retry.
 	ErrSendFailed = errors.New("send failed")

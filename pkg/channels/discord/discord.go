@@ -226,7 +226,7 @@ func (c *DiscordChannel) SendMedia(ctx context.Context, msg bus.OutboundMediaMes
 			}
 		}
 		if err != nil {
-			return fmt.Errorf("discord send media: %w", channels.ErrTemporary)
+			return channels.ClassifyAPIError(fmt.Errorf("discord send media: %w", err))
 		}
 		return nil
 	case <-sendCtx.Done():
@@ -296,7 +296,7 @@ func (c *DiscordChannel) sendChunk(ctx context.Context, channelID, content, repl
 	select {
 	case err := <-done:
 		if err != nil {
-			return fmt.Errorf("discord send: %w", channels.ErrTemporary)
+			return channels.ClassifyAPIError(fmt.Errorf("discord send: %w", err))
 		}
 		return nil
 	case <-sendCtx.Done():

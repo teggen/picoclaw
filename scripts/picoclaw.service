@@ -22,7 +22,7 @@ SyslogIdentifier=picoclaw
 # Security hardening
 NoNewPrivileges=yes
 ProtectSystem=strict
-ProtectHome=yes
+ProtectHome=no
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectKernelTunables=yes

@@ -137,7 +137,7 @@ func (c *WhatsAppChannel) Send(ctx context.Context, msg bus.OutboundMessage) err
 	_ = c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
 		_ = c.conn.SetWriteDeadline(time.Time{})
-		return fmt.Errorf("whatsapp send: %w", channels.ErrTemporary)
+		return channels.ClassifyAPIError(fmt.Errorf("whatsapp send: %w", err))
 	}
 	_ = c.conn.SetWriteDeadline(time.Time{})
 

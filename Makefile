@@ -277,8 +277,9 @@ check: deps fmt vet test
 build-local: build build-cli
 
 ## update: Build picoclaw and picoclaw-cli, then install via scripts/update.sh
+## Usage: make update [FOLLOW=1]  (FOLLOW=1 tails logs until Ctrl+C)
 update: build-local
-	sudo scripts/update.sh $(BINARY_PATH)
+	sudo scripts/update.sh $(BINARY_PATH) $(if $(FOLLOW),--follow)
 
 ## run: Build and run picoclaw
 run: build

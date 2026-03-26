@@ -224,7 +224,7 @@ func (c *DingTalkChannel) SendDirectReply(ctx context.Context, sessionWebhook, c
 		contentBytes,
 	)
 	if err != nil {
-		return fmt.Errorf("dingtalk send: %w", channels.ErrTemporary)
+		return channels.ClassifyAPIError(fmt.Errorf("dingtalk send: %w", err))
 	}
 
 	return nil
