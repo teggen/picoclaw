@@ -1,5 +1,7 @@
 # Steering — Implementation Specification
 
+> **Implemented.** This specification has been implemented. Preserved for architectural reference.
+
 ## Problem
 
 When the agent is running (executing a chain of tool calls), the user has no way to redirect it. They must wait for the full cycle to complete before sending a new message. This creates a poor experience when the agent takes a wrong direction — the user watches it waste time on tools that are no longer relevant.

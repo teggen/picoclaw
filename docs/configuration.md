@@ -350,58 +350,20 @@ All paths share the same workspace restriction — there's no way to bypass the 
 PicoClaw can perform periodic tasks automatically. Create a `HEARTBEAT.md` file in your workspace:
 
 ```markdown
-# Periodic Tasks
+# Heartbeat Tasks
+
+Add tasks below the separator line. If empty, the agent responds with HEARTBEAT_OK.
+
+---
 
 - Check my email for important messages
 - Review my calendar for upcoming events
 - Check the weather forecast
 ```
 
-The agent will read this file every 30 minutes (configurable) and execute any tasks using available tools.
+The agent reads this file every 30 minutes (configurable) and executes any listed tasks inline using available tools. If no tasks are actionable, the agent responds with `HEARTBEAT_OK`.
 
-#### Async Tasks with Spawn
-
-For long-running tasks (web search, API calls), use the `spawn` tool to create a **subagent**:
-
-```markdown
-# Periodic Tasks
-
-## Quick Tasks (respond directly)
-
-- Report current time
-
-## Long Tasks (use spawn for async)
-
-- Search the web for AI news and summarize
-- Check email and report important messages
-```
-
-**Key behaviors:**
-
-| Feature                 | Description                                               |
-| ----------------------- | --------------------------------------------------------- |
-| **spawn**               | Creates async subagent, doesn't block heartbeat           |
-| **Independent context** | Subagent has its own context, no session history          |
-| **message tool**        | Subagent communicates with user directly via message tool |
-| **Non-blocking**        | After spawning, heartbeat continues to next task          |
-
-#### How Subagent Communication Works
-
-```
-Heartbeat triggers
-    ↓
-Agent reads HEARTBEAT.md
-    ↓
-For long task: spawn subagent
-    ↓                           ↓
-Continue to next task      Subagent works independently
-    ↓                           ↓
-All tasks done            Subagent uses "message" tool
-    ↓                           ↓
-Respond HEARTBEAT_OK      User receives result directly
-```
-
-The subagent has access to tools (message, web_search, etc.) and can communicate with the user independently without going through the main agent.
+The agent avoids unsolicited messages unless a task explicitly requires notifying the user.
 
 **Configuration:**
 

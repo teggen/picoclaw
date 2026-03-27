@@ -1,5 +1,7 @@
 # Provider Architecture Refactoring - Test Suite Summary
 
+> **Historical design document.** Test plan for the provider refactoring. Note: 3 of 6 planned test files (`registry_test.go`, `factory/factory_test.go`, `integration_test.go`) were never created. Actual tests live in `pkg/config/model_config_test.go`, `pkg/config/migration_test.go`, and `pkg/providers/factory_provider_test.go`.
+
 This document summarizes the complete test suite designed for the Provider architecture refactoring.
 
 ## Test File Structure

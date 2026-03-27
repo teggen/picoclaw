@@ -48,7 +48,7 @@ picoclaw agent -m "Hello" --model claude-opus-4-6-thinking
 If you are deploying via Coolify or Docker, follow these steps to test:
 
 1.  **Environment Variables**:
-    *   `PICOCLAW_AGENTS_DEFAULTS_MODEL=gemini-flash`
+    *   `PICOCLAW_AGENTS_DEFAULTS_MODEL_NAME=gemini-flash`
 2.  **Authentication persistence**: 
     If you've logged in locally, you can copy your credentials to the server:
     ```bash

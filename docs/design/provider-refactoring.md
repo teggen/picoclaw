@@ -1,5 +1,7 @@
 # Provider Architecture Refactoring Design
 
+> **Historical design document.** The refactoring described here has been implemented. Preserved for context.
+
 > Issue: #283
 > Discussion: #122
 > Branch: feat/refactor-provider-by-protocol

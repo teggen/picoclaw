@@ -4,9 +4,9 @@
 
 ## 💬 Chat Apps
 
-Talk to your picoclaw through Telegram, Discord, WhatsApp, Matrix, QQ, DingTalk, LINE, WeCom, Feishu, Slack, IRC, OneBot, or Pico (native protocol)
+Talk to your picoclaw through Telegram, Discord, WhatsApp, Matrix, QQ, DingTalk, LINE, Feishu, Slack, IRC, OneBot, or Pico (native protocol)
 
-> **Note**: Channels that rely on HTTP callbacks share a single Gateway HTTP server (`gateway.host`:`gateway.port`, default `127.0.0.1:18790`). Socket/stream-based channels such as Feishu, DingTalk, and WeCom do not rely on the shared webhook server for inbound delivery.
+> **Note**: Channels that rely on HTTP callbacks share a single Gateway HTTP server (`gateway.host`:`gateway.port`, default `127.0.0.1:18790`). Socket/stream-based channels such as Feishu and DingTalk do not rely on the shared webhook server for inbound delivery.
 
 | Channel              | Difficulty         | Description                                           | Documentation                                                                                                    |
 | -------------------- | ------------------ | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
@@ -371,53 +371,6 @@ picoclaw gateway
 ```
 
 > In group chats, the bot responds only when @mentioned. Replies quote the original message.
-
-</details>
-
-<a id="wecom"></a>
-<details>
-<summary><b>WeCom (企业微信)</b></summary>
-
-PicoClaw now exposes WeCom as a single AI Bot channel over WebSocket.
-No public webhook callback URL is required.
-
-See [WeCom Configuration Guide](channels/wecom/README.md) for the full configuration reference and migration notes.
-
-**Quick Setup - Recommended**
-
-**1. Authenticate**
-
-```bash
-picoclaw auth wecom
-```
-
-This command shows a QR code, waits for approval in WeCom, and writes `bot_id` + `secret` into `channels.wecom`.
-
-**2. Configure manually if needed**
-
-```json
-{
-  "channels": {
-    "wecom": {
-      "enabled": true,
-      "bot_id": "YOUR_BOT_ID",
-      "secret": "YOUR_SECRET",
-      "websocket_url": "wss://openws.work.weixin.qq.com",
-      "send_thinking_message": true,
-      "allow_from": [],
-      "reasoning_channel_id": ""
-    }
-  }
-}
-```
-
-**3. Run**
-
-```bash
-picoclaw gateway
-```
-
-> Legacy `wecom_app` and `wecom_aibot` entries are replaced by the unified `channels.wecom` config in this branch.
 
 </details>
 
