@@ -34,16 +34,26 @@ Channels → Channel Manager → Message Bus → Agent → Tools → Agent → B
 - **`channels/`** — 17+ messaging platform adapters implementing a common `Channel` interface via `BaseChannel` embedding. `manager.go` handles lifecycle and routing, `split.go` handles message length limits
 - **`providers/`** — LLM provider abstraction with factory pattern, fallback chains, and round-robin load balancing. `openai_compat/` handles OpenAI-compatible APIs
 - **`tools/`** — Agent tool implementations (shell, filesystem, web, cron, MCP, I2C/SPI hardware). Registry pattern with `Name()`, `Description()`, `Parameters()`, `Execute()` interface
-- **`config/`** — Configuration system with versioned migration. `config.go` is the main structure (~51KB)
+- **`config/`** — Configuration system with versioned migration. `config.go` is the main structure (~80KB)
 - **`bus/`** — Event pub/sub message bus decoupling channels from agent
 - **`memory/`** — JSONL-based long-term conversation memory
 - **`session/`** — JSONL-based session state management
 - **`skills/`** — Skill discovery, installation, and ClawHub registry integration
+- **`api/`** — HTTP API client for ClawHub services
+- **`auth/`** — Authentication and credential management for ClawHub
+- **`gateway/`** — HTTP gateway server exposing channels as webhook endpoints
+- **`identity/`** — User identity resolution across channels
+- **`logger/`** — Structured logging utilities
+- **`media/`** — Media file handling (download, conversion, transcription)
+- **`voice/`** — Voice message processing (STT/TTS)
 - **`mcp/`** — Model Context Protocol support
+- **`metrics/`** — Lightweight runtime metrics collection
+- **`health/`** — Health check and heartbeat monitoring
+- **`heartbeat/`** — Periodic heartbeat signals for liveness
 
 ### Entry Points (`cmd/picoclaw/`)
 
-CLI uses Cobra with subcommands: `onboard`, `agent`, `gateway`, `auth`, `cron`, `migrate`, `skills`, `model`, `status`, `version`.
+CLI uses Cobra with subcommands: `onboard`, `agent`, `gateway`, `auth`, `cron`, `migrate`, `skills`, `model`, `slack`, `status`, `version`.
 
 ### Web Console (`web/`)
 
@@ -62,7 +72,7 @@ Runtime state lives in `~/.picoclaw/workspace/` (identity, agents, user profile,
 - Formatters: gci, gofmt, gofumpt, goimports, golines (all via `make fmt`)
 - Import order: standard library, third-party, local module (enforced by gci)
 - `interface{}` → `any`, `a[b:len(a)]` → `a[b:]` (enforced by gofmt rewrite rules)
-- Default build tags: `stdjson`; optional: `whatsapp_native` (for native WhatsApp support, larger binary)
+- Default build tags: `goolm,stdjson`; optional: `whatsapp_native` (for native WhatsApp support, larger binary)
 
 ## Conventions
 
